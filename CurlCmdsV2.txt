@@ -1,0 +1,227 @@
+CURL commands along with sample output.
+
+
+CHECK SERVICE AVAILABILITY STATUS
+################################################################################
+sam@ubuntu:~/SimRoot/Sims$ curl -X GET "http://graple-service.cloudapp.net/service_status"
+{
+  "status": "I am alive, and at your service. ", 
+  "time": "Fri Jun 12 12:44:14 2015"
+}sam@ubuntu:~/SimRoot/Sims$
+
+SUBMIT NORMAL BATCH PROCESSING REQUEST
+################################################################################
+sam@ubuntu:~/SimRoot/Sims$  curl -X POST -F files=@sim.zip "http://graple-service.cloudapp.net/GrapleRun"
+{
+  "uid": "O2SKIHPL6GGMXTU39TH7T1U9CDXYVG5M4TF303YV"
+}sam@ubuntu:~/SimRoot/Sims$ 
+
+################################################################################
+CHECK JOB COMPLETION STATUS
+################################################################################
+sam@ubuntu:~/SimRoot/Sims$ curl -X GET "http://graple-service.cloudapp.net/GrapleRunStatus/O2SKIHPL6GGMXTU39TH7T1U9CDXYVG5M4TF303YV"
+{
+  "curr_status": "completed"
+}sam@ubuntu:~/SimRoot/Sims$ 
+################################################################################
+REQUEST CONSOLIDATED RESULTS ZIP URI
+################################################################################
+sam@ubuntu:~/SimRoot/Sims$ curl -X GET "http://graple-service.cloudapp.net/GrapleRunResults/O2SKIHPL6GGMXTU39TH7T1U9CDXYVG5M4TF303YV"
+{
+  "output_url": "/O2SKIHPL6GGMXTU39TH7T1U9CDXYVG5M4TF303YV/Results/output.zip"
+}sam@ubuntu:~/SimRoot/Sims$ 
+################################################################################
+DOWNLOAD ZIP FILE
+################################################################################
+sam@ubuntu:~/SimRoot/Sims$ wget "http://graple-service.cloudapp.net/O2SKIHPL6GGMXTU39TH7T1U9CDXYVG5M4TF303YV/Results/output.zip"
+--2015-06-12 09:55:01--  http://graple-service.cloudapp.net/O2SKIHPL6GGMXTU39TH7T1U9CDXYVG5M4TF303YV/Results/output.zip
+Connecting to 128.227.150.20:5000... connected.
+HTTP request sent, awaiting response... 200 OK
+Length: 559263 (546K) [application/zip]
+Saving to: ‘output.zip.4’
+
+100%[===================================================================================================================================================================>] 559,263     75.4KB/s   in 7.2s   
+
+2015-06-12 09:55:09 (75.4 KB/s) - ‘output.zip.4’ saved [559263/559263]
+################################################################################
+SUBMIT BATCH SWEEP FILE
+################################################################################
+sam@ubuntu:~/panda_trial$ curl -X POST -F files=@sim.zip "http://graple-service.cloudapp.net/GrapleRunMetOffset"
+{
+  "uid": "Z4UWU5B2YKKDSHMMTUNXTUXKJOW4QI69UGKWPJ72"
+}sam@ubuntu:~/panda_trial$ 
+
+Note: contents of sim.zip file are
+1. .nml file
+2. csv files
+
+There are no SimXXX folders inside
+################################################################################
+TRIGGER SWEEP COLUMN JOB BY SPECIFYING PARAMETERS
+################################################################################
+sam@ubuntu:~/panda_trial$  curl -X POST  "http://graple-service.cloudapp.net/TriggerSimulation/Z4UWU5B2YKKDSHMMTUNXTUXKJOW4QI69UGKWPJ72*met_hourly.csv*AirTemp*-2*2*100"
+Successsam@ubuntu:~/panda_trial$
+
+Note:
+1. Success is returned after job is submitted to condor.
+2. <UID>*<CSV-File>*<COL-Name>*<Start>*<END>*<ITERATIONS>
+################################################################################
+CHECK JOB STATUS
+################################################################################
+sam@ubuntu:~/panda_trial$  curl -X GET "http://graple-service.cloudapp.net/GrapleRunStatus/Z4UWU5B2YKKDSHMMTUNXTUXKJOW4QI69UGKWPJ72"
+{
+  "curr_status": "processing"
+}sam@ubuntu:~/panda_trial$ 
+################################################################################
+REQUEST ANY SPECIFIC FILE DOWNLOAD URI
+################################################################################
+sam@ubuntu:~/panda_trial$ curl -X GET  "http://graple-service.cloudapp.net/download_file/Z4UWU5B2YKKDSHMMTUNXTUXKJOW4QI69UGKWPJ72*35*output.nc"
+{
+  "output_url": "/Z4UWU5B2YKKDSHMMTUNXTUXKJOW4QI69UGKWPJ72/Results/Sims/Sim35/Results/output.nc"
+}
+################################################################################
+DOWNLOAD THE FILE
+################################################################################
+sam@ubuntu:~/panda_trial$wget "http://graple-service.cloudapp.net/Z4UWU5B2YKKDSHMMTUNXTUXKJOW4QI69UGKWPJ72/Results/Sims/Sim35/Results/output.nc"
+--2015-06-12 10:11:11--  http://graple-service.cloudapp.net/Z4UWU5B2YKKDSHMMTUNXTUXKJOW4QI69UGKWPJ72/Results/Sims/Sim35/Results/output.nc
+Connecting to 128.227.150.20:5000... connected.
+HTTP request sent, awaiting response... 200 OK
+Length: 5449888 (5.2M) [application/x-netcdf]
+Saving to: ‘output.nc’
+
+100%[===================================================================================================================================================================>] 5,449,888    151KB/s   in 37s    
+
+2015-06-12 10:11:49 (142 KB/s) - ‘output.nc’ saved [5449888/5449888]
+################################################################################
+GET DATA FRAME DOWNLOAD URI-- Comma separated option
+################################################################################
+The below call will extract temp,NS variables from the output.nc files in 
+simuations 23,24,34 and return the below files in a zip format
+dataframe23.nc
+dataframe24.nc
+dataframe34.nc
+################################################################################
+sam@ubuntu:~/panda_trial$ curl -X GET "http://graple-service.cloudapp.net/return_dataframe/Z4UWU5B2YKKDSHMMTUNXTUXKJOW4QI69UGKWPJ72*23,24,34*temp,NS"
+{
+  "download url": "/Z4UWU5B2YKKDSHMMTUNXTUXKJOW4QI69UGKWPJ72/temp.zip", 
+  "status": "request executed succesfully"
+}sam@ubuntu:~/panda_trial$ 
+################################################################################
+DOWNLOAD THE FILE
+################################################################################
+sam@ubuntu:~/panda_trial$wget "http://graple-service.cloudapp.net/Z4UWU5B2YKKDSHMMTUNXTUXKJOW4QI69UGKWPJ72/temp.zip"
+--2015-06-12 10:16:18--  http://graple-service.cloudapp.net/Z4UWU5B2YKKDSHMMTUNXTUXKJOW4QI69UGKWPJ72/temp.zip
+Connecting to 128.227.150.20:5000... connected.
+HTTP request sent, awaiting response... 200 OK
+Length: 199322 (195K) [application/zip]
+Saving to: ‘temp.zip.1’
+
+100%[===================================================================================================================================================================>] 199,322     64.7KB/s   in 3.0s   
+
+2015-06-12 10:16:22 (64.7 KB/s) - ‘temp.zip.1’ saved [199322/199322]
+
+sam@ubuntu:~/panda_trial$ 
+################################################################################
+GET DATA FRAME DOWNLOAD URI-- Range option
+################################################################################
+The below call will extract temp,NS variables from the output.nc files in 
+simuations 23,24,25,26 and return the below files in a zip format
+dataframe23.nc
+dataframe24.nc
+dataframe25.nc
+dataframe26.nc
+################################################################################
+sam@ubuntu:~/panda_trial$ curl -X GET "http://graple-service.cloudapp.net/return_dataframe/Z4UWU5B2YKKDSHMMTUNXTUXKJOW4QI69UGKWPJ72*23-26*temp,NS"
+{
+  "download url": "/Z4UWU5B2YKKDSHMMTUNXTUXKJOW4QI69UGKWPJ72/temp.zip", 
+  "status": "request executed succesfully"
+}
+################################################################################
+DOWNLOAD THE FILE
+################################################################################
+sam@ubuntu:~/panda_trial$wget "http://graple-service.cloudapp.net/Z4UWU5B2YKKDSHMMTUNXTUXKJOW4QI69UGKWPJ72/temp.zip""
+--2015-06-12 10:17:39--  http://graple-service.cloudapp.net/Z4UWU5B2YKKDSHMMTUNXTUXKJOW4QI69UGKWPJ72/temp.zip
+Connecting to 128.227.150.20:5000... connected.
+HTTP request sent, awaiting response... 200 OK
+Length: 166668 (163K) [application/zip]
+Saving to: ‘temp.zip.2’
+
+100%[===================================================================================================================================================================>] 166,668     61.5KB/s   in 2.6s   
+
+2015-06-12 10:17:43 (61.5 KB/s) - ‘temp.zip.2’ saved [166668/166668]
+################################################################################
+Submit distribution job
+################################################################################
+Note: The zip file to be submitted needs 3 items--
+1. data csv file.
+2. .nml file
+3. job_desc.csv file (the name has to be job_desc.csv), We would provide a template of this file.
+
+sam@ubuntu:~/panda_trial$ curl -X POST -F files=@special_sim.zip "http://graple-service.cloudapp.net/GrapleRunMetSample"
+{
+  "status": "Job submitted to task queue", 
+  "uid": "K8JOFC6CB2EYK6BL3OBIJDRCR0T3LAS7ZD35K6CV"
+}sam@ubuntu:~/panda_trial$ 
+################################################################################
+Check job status
+################################################################################
+sam@ubuntu:~/panda_trial$ curl -X GET "http://graple-service.cloudapp.net/GrapleRunStatus/K8JOFC6CB2EYK6BL3OBIJDRCR0T3LAS7ZD35K6CV"
+{
+  "curr_status": "processing"
+}sam@ubuntu:~/panda_trial$ curl -X GET "http://graple-service.cloudapp.net/GrapleRunStatus/K8JOFC6CB2EYK6BL3OBIJDRCR0T3LAS7ZD35K6CV"
+{
+  "curr_status": "completed"
+}
+################################################################################
+Get results URI for distribution job
+################################################################################
+Note:
+1. Call for results should be made after job status is completed. 
+The returned output.zip folder will contain a job_summary.csv file and a 'Sims' 
+folder with results of all simulations.
+sam@ubuntu:~/panda_trial$curl -X GET "http://graple-service.cloudapp.net/GrapleRunResultsMetSample/K8JOFC6CB2EYK6BL3OBIJDRCR0T3LAS7ZD35K6CV"
+{
+  "output_url": "/K8JOFC6CB2EYK6BL3OBIJDRCR0T3LAS7ZD35K6CV/Results/output.zip"
+}sam@ubuntu:~/panda_trial$ 
+################################################################################
+Retrieve results  for distribution job
+################################################################################
+sam@ubuntu:~/panda_trial$ wget "http://graple-service.cloudapp.net/K8JOFC6CB2EYK6BL3OBIJDRCR0T3LAS7ZD35K6CV/Results/output.zip"
+--2015-07-22 06:34:41--  http://graple-service.cloudapp.net/K8JOFC6CB2EYK6BL3OBIJDRCR0T3LAS7ZD35K6CV/Results/output.zip
+Connecting to 128.227.150.20:5000... connected.
+HTTP request sent, awaiting response... 200 OK
+Length: 11355449 (11M) [application/zip]
+Saving to: ‘output.zip’
+
+100%[===================================================================================================================================================================>] 11,355,449  5.27MB/s   in 2.1s   
+
+2015-07-22 06:34:43 (5.27 MB/s) - ‘output.zip.1’ saved [11355449/11355449]
+
+sam@ubuntu:~/panda_trial$
+################################################################################
+Abort a  job-
+Once a job has been succesfully aborted, Checking it's status via GrapleRunStatus
+will return "completed"
+################################################################################
+curl -X POST -F files=@special_sim.zip "http://graple-service.cloudapp.net/GrapleRunMetSample"
+{
+  "status": "Job submitted to task queue",
+  "uid": "0HWNBMSITD4FU03I0SSHQHDXF52T4ATH40Z4VCN1"
+}
+
+curl -X POST  "http://graple-service.cloudapp.net/TriggerSimulation/0HWNBMSITD4FU03I0SSHQHDXF52T4ATH40Z4VCN1*met_hourly.csv*AirTemp*-2*2*20"
+{
+  "response": "Job put in the task queue"
+}
+################################################################################
+curl -X GET "http://graple-service.cloudapp.net/GrapleAbort/0HWNBMSITD4FU03I0SSHQHDXF52T4ATH40Z4VCN1"
+{
+  "curr_status": "All jobs marked for removal"
+}
+################################################################################
+ curl -X GET "http://graple-service.cloudapp.net/GrapleRunStatus/0HWNBMSITD4FU03I0SSHQHDXF52T4ATH40Z4VCN1"
+{
+  "curr_status": "completed"
+}
+
+
