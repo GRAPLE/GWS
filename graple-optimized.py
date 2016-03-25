@@ -18,6 +18,7 @@ import tarfile
 from pymongo import MongoClient
 from netCDF4 import Dataset
 from os import listdir
+import json
 
 # http://unix.stackexchange.com/questions/13093/add-update-a-file-to-an-existing-tar-gz-archive
 # http://unix.stackexchange.com/questions/46969/compress-a-folder-with-tar
@@ -33,19 +34,9 @@ collection = db.graple_collection
 
 # global variables and paths
 
-base_upload_path = '/datadrive/Graple-flask/static'
-base_graple_path = '/datadrive/Graple-flask/GRAPLE_SCRIPTS'
-base_GLM_path    = '/datadrive/Graple-flask/GLM_Bins'
-
-#def parse_config():
-#    global base_upload_path
-#    global base_graple_path
-#    global base_GLM_path  
-#    with open('config.json', 'r') as f:
-#        config = json.load(f)
-#        base_upload_path = config["base_upload_path"]
-#        base_graple_path = config["base_graple_path"]
-#        base_GLM_path = config["base_GLM_path"]
+base_upload_path = '/home/grapler-cert/datadrive/static'
+base_graple_path = '/home/grapler-cert/datadrive/GRAPLE_SCRIPTS'
+base_GLM_path    = '/home/grapler-cert/datadrive/GLM_Bins'
 
 @celery.task 
 def doTask(task, rscript=''):
@@ -82,6 +73,7 @@ def setup_graple(path,filename, rscript):
         filename = rscript 
         os.chdir("Scripts")
         shutil.copy(os.path.join(topdir, "Filters", filename),os.getcwd())
+        os.rename(filename, 'PostProcessFilter.R')
     os.chdir(topdir) 
     
 def execute_graple(path):
@@ -186,6 +178,7 @@ def handle_sweep_run(dir_name,sweepstring):
             subprocess.call(['tar','xvfz','sim.tar.gz'])
             os.remove("sim.tar.gz") 
             shutil.copy(os.path.join(current_dir,"Filters", base_filename),os.getcwd())
+            os.rename(base_filename, 'PostProcessFilter.R')
             os.chdir(current_dir)
 
         base_column = base_column.strip()        
@@ -205,7 +198,7 @@ def handle_sweep_run(dir_name,sweepstring):
             delta=base_start + (i-1)*base_steps
             print(str(base_column))
             print ("i "+str(i)+" base_steps"+str(base_steps)+" base_start"+str(base_start)+" delta"+str(delta) + " file"+ str(base_column))
-            data[base_column] = data[base_column].apply(lambda val:val+delta) 
+	    data[base_column] = data[base_column].apply(lambda val:val+delta) 
             data.to_csv(base_file,index=False)
         execute_graple(dir_name)
 
@@ -299,6 +292,7 @@ def handle_special_job(task, rscript):
             scripts_dir =  os.path.join(current_dir,'Scripts')
             os.chdir(scripts_dir)
             shutil.copy(os.path.join(current_dir, "Filters", filename),os.getcwd())
+            os.rename(filename, 'PostProcessFilter.R')
             os.chdir(current_dir)
 
         # execute graple job
@@ -442,7 +436,7 @@ def run_sweep(filtername):
         subprocess.call(['python' , 'CreateWorkingFolders.py'])
         if(filtername):      
             os.chdir("Scripts")
-            shutil.copy(os.path.join(topdir,filtername),os.getcwd())      
+    	    shutil.copy(os.path.join(topdir,filtername),os.getcwd())      
             os.chdir(topdir)
         return jsonify(response)
       
@@ -531,57 +525,24 @@ def return_service_status():
         localtime = time.asctime( time.localtime(time.time()) )
         service_status["time"]=localtime
         return jsonify(service_status)
-        
-@app.route('/return_dataframe/<frame_req_string>', methods=['GET'])        
-def make_dataframe(frame_req_string):
-    global base_upload_path
-    uid = frame_req_string.split("*")[0]
-    fields = frame_req_string.split("*")[2]
-    base_path=os.path.join(base_upload_path,uid)
-    if "-" in frame_req_string.split("*")[1]:
-        start = int(frame_req_string.split("*")[1].split("-")[0])
-        end = int(frame_req_string.split("*")[1].split("-")[1])
-        requested_frame_indices = map(str,range(start,end+1)) 
-    else:
-        requested_frame_indices = frame_req_string.split("*")[1].split(",")
-    # get number of Sims
-    num_sims = 0
-    for each in os.listdir(os.path.join(base_path,'Results','Sims')):
-        num_sims = num_sims + 1
-    num_sims = num_sims - 2
-    # do sanity check
-    exception = False
-    for each in requested_frame_indices:
-        if (int(each) > num_sims):
-            exception = True
-    cmd_status = {}
-    if (exception):
-        cmd_status["status"]= "Specified frame can't be constructed please check input arguments"
-        return jsonify(cmd_status)      
 
-    # clean temp directory
-    temp=os.path.join(base_path,"temp")
-    if(os.path.isdir(temp)): 
-        shutil.rmtree(temp)
-        os.mkdir(temp) 
-        
-    # start extracting required variables
-    os.chdir(os.path.join(base_path,'Results','Sims'))
-    for each in requested_frame_indices:
-        dir_name = "Sim"+each
-        infile = os.path.join(base_path,'Results','Sims',dir_name,'Results','output.nc')
-        outfile = os.path.join(base_path,'Results','Sims',dir_name,'Results','dataframe.nc')
-        if (ExtractDataFrame(infile,outfile,fields)):
-        filename = "dataframe"+each+".nc"
-        resultPath = os.path.join(temp, filename)
-        shutil.copyfile(outfile, resultPath)            
-            os.remove(infile)
+@app.route('/GrapleListFilters', methods=['GET'])
+def get_PPOLibrary_scripts():
+    global base_graple_path
+    filesList = [] 
+    if request.method == 'GET':
+        scriptsDir = os.path.join(base_graple_path, "Filters")
+        if(os.path.exists(scriptsDir)):
+            filesList = os.listdir(scriptsDir) 
+    return json.dumps(filesList)        
 
-    url = url_for('static',filename=outfile)  
-    cmd_status["download url"] = url 
-    cmd_status["status"] = "request executed succesfully"
-    return jsonify(cmd_status)
-        
+@app.route('/GrapleGetVersion', methods=['GET'])
+def get_version():
+    version = {}
+    if request.method == 'GET':
+        #code for getting the current version of graple service
+        version = {"version": "1.0.2"} 
+    return jsonify(version)
 
 if __name__ == '__main__':
     app.debug = True
