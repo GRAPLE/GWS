@@ -16,14 +16,17 @@ from celery import Celery
 import pymongo
 import tarfile
 from pymongo import MongoClient
-from netCDF4 import Dataset
 from os import listdir
 import json
 
-# http://unix.stackexchange.com/questions/13093/add-update-a-file-to-an-existing-tar-gz-archive
-# http://unix.stackexchange.com/questions/46969/compress-a-folder-with-tar
- 
-app = Flask(__name__, static_url_path='')
+# global variables and paths
+base_working_path = '/home/grapleadmin/grapleService/'
+
+base_upload_path = base_working_path + 'static'
+base_graple_path = base_working_path + 'GRAPLE_SCRIPTS'
+base_GLM_path    = base_working_path + 'GLM_Bins'
+
+app = Flask(__name__, static_url_path='', static_folder = base_upload_path)
 app.config['CELERY_BROKER_URL'] = 'amqp://'
 #app.config['CELERY_RESULT_BACKEND'] = 'ampq'
 celery = Celery(app.name, broker=app.config['CELERY_BROKER_URL'])
@@ -31,12 +34,6 @@ celery.conf.update(app.config)
 db_client = MongoClient() # running at default port
 db = db_client.grapleDB
 collection = db.graple_collection
-
-# global variables and paths
-
-base_upload_path = '/home/grapler-cert/datadrive/static'
-base_graple_path = '/home/grapler-cert/datadrive/GRAPLE_SCRIPTS'
-base_GLM_path    = '/home/grapler-cert/datadrive/GLM_Bins'
 
 @celery.task 
 def doTask(task, rscript=''):
@@ -105,7 +102,6 @@ def process_graple_results(path):
     os.chdir(path)
     
 def check_Job_status(path):
-    completed=True
     os.chdir(path)
     query = {'key':str(path)}
     try:
@@ -113,16 +109,11 @@ def check_Job_status(path):
     except:
         print ("error in db access in check_job_status")
         return "Job submission to Condor pool in progress."
-    for each in submitIDList:
-        cout = subprocess.check_output(['condor_q', each])
-        if cout.count("\n")!=4:
-            completed=False
-            break
-    if (completed):
-        return "completed"
-    else:
-        return "processing"
-        
+    condor_command = ['condor_history'] + map(str, submitIDList) + ['-format', '%d', 'JobStatus']
+    cout = subprocess.check_output(condor_command)
+    compl = float(cout.count("4"))/len(submitIDList)*100
+    return str(round(compl, 2)) + "% complete"
+
 def Abort_Job(path):
     os.chdir(path)
     query = {'key':str(path)}
@@ -299,32 +290,6 @@ def handle_special_job(task, rscript):
         execute_graple(dir_name)
         return
         
-def ExtractDataFrame(input_file,output_file,var_list):
-    #open input file for reading
-        if (not(os.path.exists(input_file))):
-            return False
-        infile  = Dataset(input_file)
-        #oprn output file for reading
-        outfile = Dataset(output_file, "w",format="NETCDF3_CLASSIC")
-        #dimension variables
-        dims = []
-        #Copy dimensions
-        for dname, the_dim in infile.dimensions.iteritems():
-            print dname, len(the_dim)
-            dims.append(dname)
-            outfile.createDimension(dname, len(the_dim) if not the_dim.isunlimited() else None)
-        # Copy variables
-        for v_name, varin in infile.variables.iteritems():
-            if (v_name in var_list or v_name in dims):
-                outVar = outfile.createVariable(v_name, varin.datatype, varin.dimensions)
-                print ("name %s type %s"%(v_name,varin.datatype))
-                # Copy variable attributes
-                outVar.setncatts({k: varin.getncattr(k) for k in varin.ncattrs()})
-                outVar[:] = varin[:]
-        # close the output file
-        outfile.close() 
-        return True
-
 @app.route('/GrapleRunMetSample', defaults={'filtername': None}, methods= ['GET', 'POST'])        
 @app.route('/GrapleRunMetSample/<filtername>', methods= ['GET', 'POST'])        
 def special_batch(filtername):
@@ -449,7 +414,7 @@ def return_consolidated_output(uid):
         # Sanity check to ensure that job processing is completed.
         status = {}
         status["curr_status"] = check_Job_status(dir_name)
-        if (status["curr_status"] != "completed"):
+        if not status["curr_status"].startswith("100"):
             ret_dict["status"]="Job under processing,please try agian after some time."
             return jsonify(ret_dict)
         process_graple_results(dir_name)
@@ -469,7 +434,7 @@ def return_distributionJob_consolidated_output(uid):
         # Sanity check to ensure that job processing is completed.
         status = {}
         status["curr_status"] = check_Job_status(dir_name)
-        if (status["curr_status"] != "completed"):
+        if not status["curr_status"].startswith("100"):
             ret_dict["status"]="Job under processing,please try agian after some time."
             return jsonify(ret_dict)
         process_graple_results(dir_name)
