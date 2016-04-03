@@ -24,7 +24,6 @@ base_working_path = '/home/grapleadmin/grapleService/'
 
 base_upload_path = base_working_path + 'static'
 base_graple_path = base_working_path + 'GRAPLE_SCRIPTS'
-base_GLM_path    = base_working_path + 'GLM_Bins'
 
 app = Flask(__name__, static_url_path='', static_folder = base_upload_path)
 app.config['CELERY_BROKER_URL'] = 'amqp://'
@@ -54,7 +53,6 @@ def batch_id_generator(size=40, chars=string.ascii_uppercase + string.digits):
 
 def setup_graple(path,filename, rscript):
     copy_tree(base_graple_path,path)
-    copy_tree(base_GLM_path,path)
     os.chdir(path)
     subprocess.call(['python' , 'CreateWorkingFolders.py'])
     topdir = path
@@ -198,8 +196,6 @@ def handle_special_job(task, rscript):
     if (task.split('$')[0] == "graple_special_batch"):
         dir_name = task.split('$')[1]
         filename = task.split('$')[2]
-        print dir_name
-        print filename
       
         current_dir = os.path.join(os.getcwd(), dir_name) 
         base_folder = os.path.join(dir_name,'base_folder')
@@ -224,7 +220,6 @@ def handle_special_job(task, rscript):
             columns[job_description[i][0]]=[ret_distribution_samples(job_description[i][2],base_iterations,job_description[i][3:])]
             columns[job_description[i][0]].append(job_description[i][1])
             columns[job_description[i][0]].append(job_description[i][2])
-        print str(columns)
         # clean Sims directory
         Sims_dir=os.path.join(dir_name,'Sims')
         shutil.rmtree(Sims_dir)
@@ -269,7 +264,6 @@ def handle_special_job(task, rscript):
                     summary[i-1].append(str(delta)) # append delta
             # at this point the dataframe has been modified, write back to csv.
             data.to_csv(base_file,index=False)
-        print str(summary)
         # write summary of modifications to a file.
         result_summary = open(os.path.join(base_folder,"sim_summary.csv"),'wb')
         wr = csv.writer(result_summary,dialect='excel')
@@ -307,7 +301,6 @@ def special_batch(filtername):
         f.save(filename)
         os.chdir(topdir)
         copy_tree(base_graple_path,topdir)
-        copy_tree(base_GLM_path,topdir)
         subprocess.call(['python' , 'CreateWorkingFolders.py'])
         # have to submit job to celery here--below method has to be handled by celery worker
         task_desc = "graple_special_batch"+"$"+dir_name+"$"+filename
@@ -397,7 +390,6 @@ def run_sweep(filtername):
         f.save(filename)
         os.chdir(topdir)
         copy_tree(base_graple_path,topdir)
-        copy_tree(base_GLM_path,topdir)
         subprocess.call(['python' , 'CreateWorkingFolders.py'])
         if(filtername):      
             os.chdir("Scripts")
