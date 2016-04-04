@@ -12,15 +12,13 @@ The steps below explain the process of setting up GRAPLEr in its minimal configu
 ## Central Manager Node
 
 ### Optional Installations
-
 + open-vm-tools (if using a VMWare hypervisor)
 + openssh-server (for ssh access)
 
 Please perform update and dist-upgrade to install the latest distribution before proceeding.
 
 ### Recommended Installations
-
-#### Install the following with apt-get:
+Install the following with apt-get:
 + vim
 + python-pip
 + git
@@ -42,9 +40,10 @@ _IPOP is necessary if the worker nodes do not share the same network_
 (sleep 15; sudo service condor restart) &
 ```
 
-## Installing Condor
+### Installing Condor
 + Download the current stable release from [htcondor website](http://research.cs.wisc.edu/htcondor/downloads/)
 + Run the following commands:
+NOTE: Copy the appropriate condor_config.local file for each machine
 ```
 sudo dpkg -i package.deb
 sudo apt-get -f install
@@ -52,13 +51,12 @@ sudo dpkg -i package.deb
 cp condor_config.local /etc/condor
 service condor start
 ```
-_copy the appropriate condor\_config.local file for each machine_
 
-# Worker Node
+## Worker Node
 
 __Follow the instructions for central manager first and then continue from below__
 
-## Installing R
+### Installing R
 
 Run the following commands:
 ```
@@ -69,7 +67,7 @@ update
 r-base
 ```
 
-## Installing GLMr
+### Installing GLMr
 
 Install the following with apt-get:
 + netcdf-bin
@@ -80,7 +78,7 @@ Run the following R command in superuser mode:
     install.packages(c("GLMr", "glmtools"), repos = c("http://owi.usgs.gov/R", getOption("repos")))
 ```
 
-## Installing glmtools
+### Installing glmtools
 + Download [glmtools binary](http://aed.see.uwa.edu.au/research/models/GLM/Pages/getting_started.html)
 + Run the following commands:
 ```
@@ -90,10 +88,10 @@ sudo dpkg -i package.deb
 sudo unzip glmlib.zip /usr/lib
 ```
 
-# Submit Node
+## Submit Node
 __Follow the instructions for central manager first and then continue from below__
 
-## Installing python dependencies
+### Installing python dependencies
 
 + [mongodb-org](https://docs.mongodb.org/manual/tutorial/install-mongodb-on-ubuntu/)
 
@@ -107,6 +105,29 @@ __Follow the instructions for central manager first and then continue from below
 + Celery
 + pymongo
 
-## Starting and stopping the service
+### Setting up GEMT
+Download GEMT repository and create a static folder. Setup the Filters as necessary. The static folder is the working directory of GWS. All experiments and results will be stored in it in a directory whose name is the uid of experiment.
+
+The end result should look like this:
+```
+grapleService
+├── GRAPLE_SCRIPTS
+│   ├── CreateWorkingFolders.py
+│   ├── Filters
+│   │   ├── Filter1.R
+│   │   └── Filter2.R
+│   ├── Graple
+│   │   └── Graple.py
+│   ├── Graple.sln
+│   ├── ProcessGrapleBatchOutputs.py
+│   └── SubmitGrapleBatch.py
+└── static
+```
+
+The absolute path of grapleService folder should be set as base_working_path in [graple-optimized.py](graple-optimized.py)
+`base_working_path = /home/grapleadmin/grapleService/`
+
+
+### Starting and stopping the service
 
 Run [startGWS.sh](startGWS.sh) or [stopGWS.sh](stopGWS.sh)
