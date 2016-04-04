@@ -42,8 +42,7 @@ _IPOP is necessary if the worker nodes do not share the same network_
 
 ### Installing Condor
 + Download the current stable release from [htcondor website](http://research.cs.wisc.edu/htcondor/downloads/)
-+ Run the following commands:
-NOTE: Copy the appropriate condor_config.local file for each machine
++ Run the following commands: (see NOTE below)
 ```
 sudo dpkg -i package.deb
 sudo apt-get -f install
@@ -51,6 +50,7 @@ sudo dpkg -i package.deb
 cp condor_config.local /etc/condor
 service condor start
 ```
+NOTE: Copy the appropriate condor_config.local file for each machine
 
 ## Worker Node
 
@@ -75,7 +75,7 @@ Install the following with apt-get:
 
 Run the following R command in superuser mode:
 ```
-    install.packages(c("GLMr", "glmtools"), repos = c("http://owi.usgs.gov/R", getOption("repos")))
+install.packages(c("GLMr", "glmtools"), repos = c("http://owi.usgs.gov/R", getOption("repos")))
 ```
 
 ### Installing glmtools
@@ -125,6 +125,7 @@ grapleService
 ```
 
 The absolute path of grapleService folder should be set as base_working_path in [graple-optimized.py](graple-optimized.py)
+
 `base_working_path = /home/grapleadmin/grapleService/`
 
 
