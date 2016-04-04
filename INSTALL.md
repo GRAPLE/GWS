@@ -126,7 +126,7 @@ grapleService
 
 The GWS code can be placed elsewhere.
 
-The absolute path of grapleService folder should be set as base_working_path in [graple-optimized.py](graple-optimized.py)
+The absolute path of grapleService folder should be set as base_working_path in [gws.py](gws.py)
 
 `base_working_path = /home/grapleadmin/grapleService/`
 
@@ -134,3 +134,99 @@ The absolute path of grapleService folder should be set as base_working_path in 
 ### Starting and stopping the service
 
 Run [startGWS.sh](startGWS.sh) or [stopGWS.sh](stopGWS.sh)
+
+The application should be running at <IP address>:5000 by default.
+It should now be possible to use the application from [GRAPLEr](https://github.com/GRAPLE/GRAPLEr)
+
+For best results, it is recommended to spawn multiple processes using uWSGI and Nginx.
+
+### Installing and running uWSGI and Nginx
+
+Install the following with apt-get:
++ nginx
++ uwsgi
+
+Create a configuration file gws.ini (uWSGI configuration file for GWS) with the following content:
+```
+(in directory where gws.py is stored)$ vim gws.ini
+```
+```
+[uwsgi]
+
+module = gws
+callable = app
+
+# http-socket = :8000 # enable to run without nginx
+master = true
+processes = 5
+
+socket = gws.sock
+chmod-socket = 660
+vacuum = true
+
+die-on-term = true
+```
+
+
+Create a new file (server block configuration) for Nginx and with the following content:
+NOTE: Replace x with your server IP or name.
+```
+sudo vim /etc/nginx/sites-available/gws
+```
+```
+server {
+    listen 80;
+    server_name xxx.xxx.xxx.xxx;
+
+    location / {
+        include uwsgi_params;
+        uwsgi_pass unix:/home/grapleadmin/GWS/gws.sock;
+    }
+}
+```
+
+Restart Nginx by executing `sudo service nginx restart`
+
+Create Upstart scripts for uWSGI and Celery with the following content:
+```
+sudo vim /etc/init/gwsUwsgi.conf
+```
+```
+description "uWSGI server instance to serve Graple Web Service"
+
+start on runlevel [2345]
+stop on runlevel [!2345]
+
+setuid grapleadmin
+setgid www-data
+
+script
+    chdir /home/grapleadmin/GWS
+    exec uwsgi --ini gws.ini > uwsgi.out
+end script
+```
+
+
+```
+sudo vim /etc/init/gwsCelery.conf
+```
+```
+description "Celery workers to serve Graple Web Service"
+
+start on runlevel [2345]
+stop on runlevel [!2345]
+
+setuid grapleadmin
+setgid www-data
+
+script
+    chdir /home/grapleadmin/GWS
+    exec celery -A gws.celery worker --loglevel=info > celery.out
+end script
+```
+
+Start the services:
+```
+sudo start gwsUwsgi
+sudo start gwsCelery
+```

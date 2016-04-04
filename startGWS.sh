@@ -1,5 +1,4 @@
 #!/bin/bash
 
-nohup celery -A graple-optimized.celery worker --loglevel=info &
-nohup python graple-optimized.py &
-
+nohup celery -A gws.celery worker --loglevel=info &
+nohup python gws.py &
