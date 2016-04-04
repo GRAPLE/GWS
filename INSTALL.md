@@ -169,6 +169,7 @@ die-on-term = true
 
 
 Create a new file (server block configuration) for Nginx and with the following content:
+
 NOTE: Replace x with your server IP or name.
 ```
 sudo vim /etc/nginx/sites-available/gws
