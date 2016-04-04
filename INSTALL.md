@@ -63,8 +63,8 @@ Run the following commands:
 sudo sh -c 'echo "deb http://cran.rstudio.com/bin/linux/ubuntu trusty/" >> /etc/apt/sources.list'
 gpg --keyserver keyserver.ubuntu.com --recv-key E084DAB9
 gpg -a --export E084DAB9 | sudo apt-key add -
-update
-r-base
+sudo apt-get update
+sudo apt-get install r-base
 ```
 
 ### Installing GLMr
@@ -85,7 +85,7 @@ install.packages(c("GLMr", "glmtools"), repos = c("http://owi.usgs.gov/R", getOp
 sudo dpkg -i package.deb
 sudo apt-get -f install
 sudo dpkg -i package.deb
-sudo unzip glmlib.zip /usr/lib
+sudo unzip glmlib.zip -d /usr/lib
 ```
 
 ## Submit Node
@@ -106,7 +106,7 @@ __Follow the instructions for central manager first and then continue from below
 + pymongo
 
 ### Setting up GEMT
-Download GEMT repository and create a static folder. Setup the Filters as necessary. The static folder is the working directory of GWS. All experiments and results will be stored in it in a directory whose name is the uid of experiment.
+Download GEMT repository and create a static folder. Setup the Filters as necessary. The static folder is the working directory of GWS. All experiments and results will be stored in it.
 
 The end result should look like this:
 ```
@@ -123,6 +123,8 @@ grapleService
 │   └── SubmitGrapleBatch.py
 └── static
 ```
+
+The GWS code can be placed elsewhere.
 
 The absolute path of grapleService folder should be set as base_working_path in [graple-optimized.py](graple-optimized.py)
 
