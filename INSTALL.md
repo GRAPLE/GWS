@@ -5,9 +5,9 @@ The steps below explain the process of setting up GRAPLEr in its minimal configu
 **Recommended Operating System:** Ubuntu 14.04 LTS
 
 **Recommended setup:**
-+ One machine for submit node running GWS
-+ One machine for central manager (handles matchmaking and negotiation)
-+ At least one machine for worker node
++ One machine for [central manager](#central-manager-node) (handles matchmaking and negotiation)
++ One machine for [submit node](#submit-node) running Graple Web Service
++ At least one machine for [worker node](#worker-node)
 
 ## Central Manager Node
 
