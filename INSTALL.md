@@ -1,6 +1,6 @@
 # Instructions for setting up GRAPLEr
 
-The steps below explain the process of setting up GRAPLEr in its minimal configuration
+The steps below explain the process of setting up GRAPLE in its minimal configuration
 
 **Recommended Operating System:** Ubuntu 14.04 LTS
 
@@ -95,12 +95,12 @@ __Follow the instructions for central manager first and then continue from below
 
 + [mongodb-org](https://docs.mongodb.org/manual/tutorial/install-mongodb-on-ubuntu/)
 
-### Install the following with apt-get:
+Install the following with apt-get:
 + python-numpy
 + python-pandas
 + rabbitmq-server
 
-### Install the follwing with pip:
+Install the following with pip:
 + Flask
 + Celery
 + pymongo
