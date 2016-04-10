@@ -35,21 +35,21 @@ _IPOP is necessary if the worker nodes do not share the same network_
         - 172.31.0.100 for central manager
         - 172.31.1.x for workers
 + Make IPOP run at startup and then restart condor service by adding the following in `/etc/rc.local`
-```
-/home/grapleadmin/ipopbin/startipop.sh
-(sleep 15; sudo service condor restart) &
-```
+    ```
+    /home/grapleadmin/ipopbin/startipop.sh
+    (sleep 15; sudo service condor restart) &
+    ```
 
 ### Installing Condor
 + Download the current stable release from [htcondor website](http://research.cs.wisc.edu/htcondor/downloads/)
 + Run the following commands: (see NOTE below)
-```
-sudo dpkg -i package.deb
-sudo apt-get -f install
-sudo dpkg -i package.deb
-cp condor_config.local /etc/condor
-service condor start
-```
+    ```
+    sudo dpkg -i package.deb
+    sudo apt-get -f install
+    sudo dpkg -i package.deb
+    cp condor_config.local /etc/condor
+    service condor start
+    ```
 NOTE: Copy the appropriate condor_config.local file for each machine
 
 ## Worker Node
@@ -81,12 +81,12 @@ install.packages(c("GLMr", "glmtools"), repos = c("http://owi.usgs.gov/R", getOp
 ### Installing glmtools
 + Download [glmtools binary](http://aed.see.uwa.edu.au/research/models/GLM/Pages/getting_started.html)
 + Run the following commands:
-```
-sudo dpkg -i package.deb
-sudo apt-get -f install
-sudo dpkg -i package.deb
-sudo unzip glmlib.zip -d /usr/lib
-```
+	```
+	sudo dpkg -i package.deb
+	sudo apt-get -f install
+	sudo dpkg -i package.deb
+	sudo unzip glmlib.zip -d /usr/lib
+	```
 
 ## Submit Node
 __Follow the instructions for central manager first and then continue from below__
