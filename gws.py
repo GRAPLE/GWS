@@ -69,6 +69,9 @@ def setup_graple(path,filename, rscript):
         os.chdir("Scripts")
         shutil.copy(os.path.join(topdir, "Filters", filename),os.getcwd())
         os.rename(filename, 'PostProcessFilter.R')
+        filterParamsDir = os.path.join(topdir, "Sims", "FilterParams")
+        if(os.path.join(filterParamsDir)):
+            shutil.copy(os.path.join(filterParamsDir, "FilterParams.json"), os.getcwd())
     os.chdir(topdir) 
     
 def execute_graple(path):
@@ -168,6 +171,10 @@ def handle_sweep_run(dir_name,sweepstring):
             os.remove("sim.tar.gz") 
             shutil.copy(os.path.join(current_dir,"Filters", base_filename),os.getcwd())
             os.rename(base_filename, 'PostProcessFilter.R')
+            filterParamsDir = os.path.join(current_dir, "base_folder", "FilterParams") 
+            if(os.path.exists(filterParamsDir)):
+                shutil.copy(os.path.join(filterParamsDir, "FilterParams.json"),os.getcwd())
+                shutil.rmtree(filterParamsDir) 
             os.chdir(current_dir)
 
         base_column = base_column.strip()        
@@ -204,66 +211,75 @@ def handle_special_job(task, rscript):
         #subprocess.call(['unzip' , filename])
         subprocess.call(['tar','xvfz',filename])
         # read job description from csv file
-        f = open("job_desc.csv")
-        csv_f = csv.reader(f)
-        # list to hold job description
-        job_description = []
-        for row in csv_f:
-            job_description.append(row)
-        # get job parameters set up
-        base_file = job_description[0][1]
-        base_iterations = int(job_description[1][1])
-        # columns to be affected and there properties
-        # {col1:[], col2:[],col3[]......}
-        columns = {}
-        for i in range(2,len(job_description)):
-            columns[job_description[i][0]]=[ret_distribution_samples(job_description[i][2],base_iterations,job_description[i][3:])]
-            columns[job_description[i][0]].append(job_description[i][1])
-            columns[job_description[i][0]].append(job_description[i][2])
-        # clean Sims directory
-        Sims_dir=os.path.join(dir_name,'Sims')
-        shutil.rmtree(Sims_dir)
-        os.mkdir(Sims_dir)
-        # this list contains the changes made to csv file for every sim
+        with open('job_desc.json') as data_file:    
+            jsondata = json.load(data_file)
         summary = []
-        # create new csv files as per job description
-        for i in range(1,base_iterations+1):
-            summary.append(["sim_"+str(i)])
-            os.chdir(Sims_dir)
-            new_dir="Sim"+ str(i)
-            os.mkdir(new_dir)
-            os.chdir(new_dir)
-            shutil.copy(os.path.join(dir_name,'base_folder',filename),os.getcwd())
-            #subprocess.call(['unzip' , filename])
-            subprocess.call(['tar','xvfz',filename])
-            os.remove(filename)
-            os.remove("job_desc.csv")
-            #shutil.rmtree(os.path.join(os.getcwd(), 'FilterParams')) 
-            data=pandas.read_csv(base_file)
-            data = data.rename(columns=lambda x: x.strip())  
-            for field in columns.keys():
-                if (((" "+field) in data.columns) or (field in data.columns)):
+        columns = {}
+        noOfFiles = len(jsondata["ExpFiles"]) 
+        for i in range(0, noOfFiles):
+            base_file = jsondata["ExpFiles"][i]["driverfile"]
+            base_iterations = jsondata["ExpFiles"][i]["num_iterations"]
+            variables = jsondata["ExpFiles"][i]["variables"][0]
+            for key, value in variables.iteritems():
+                variable = key
+                var_distribution = ""
+                var_start_value = 0
+                var_end_value = 0
+                var_operation = ""
+                if("distribution" in value):
+                    var_distribution = value["distribution"]
+                if("operation" in value):
+                    var_operation = value["operation"]                  
+                if("start" in value):
+                    var_start_value = value["start"]
+                if("end" in value):
+                    var_end_value = value["end"]    
+                columns[base_file] = {}
+                columns[base_file][variable]=[ret_distribution_samples(var_distribution,base_iterations,[var_start_value, var_end_value])]
+                columns[base_file][variable].append(var_operation)
+                columns[base_file][variable].append(var_distribution)
+            Sims_dir=os.path.join(dir_name,'Sims')                
+            shutil.rmtree(Sims_dir)           
+            os.mkdir(Sims_dir) 
+            for i in range(1,base_iterations+1):
+                os.chdir(Sims_dir)
+                new_dir="Sim"+ str(i)
+                if not os.path.exists(new_dir):
+                    summary.append(["sim_"+str(i)])
+                    os.mkdir(new_dir)
+                    os.chdir(new_dir)
+                    shutil.copy(os.path.join(dir_name,'base_folder',filename),os.getcwd())
+                    subprocess.call(['tar','xvfz',filename])
+                    os.remove(filename)
+                    os.remove("job_desc.json")
+                else:                
+                    os.chdir(new_dir)    
+                data = pandas.read_csv(base_file)
+                data = data.rename(columns=lambda x: x.strip())  
+                for field in columns[base_file].keys():
+                    if (((" "+field) in data.columns) or (field in data.columns)):
                     # handle variations in filed names in csv file, some field names have leading spaces.
-                    if " "+field in data.columns:
-                        field_modified = " "+field
-                    else:
-                        field_modified = field
-                    delta = columns[field][0][i-1]
-                    if (columns[field][1]=="add"):
-                        data[field_modified]=data[field_modified].apply(lambda val:val+delta)
-                    elif (columns[field][1]=="sub"):
-                        data[field_modified]=data[field_modified].apply(lambda val:val-delta)
-                    elif (columns[field][1]=="mul"):
-                        data[field_modified]=data[field_modified].apply(lambda val:val*delta)
-                    elif (columns[field][1]=="div"):
-                        data[field_modified]=data[field_modified].apply(lambda val:val/delta)
-                    # make note of modified changes in a list datastructure
-                    summary[i-1].append(field) # append column_name
-                    summary[i-1].append(columns[field][2]) # append distribution
-                    summary[i-1].append(columns[field][1]) # append operation
-                    summary[i-1].append(str(delta)) # append delta
-            # at this point the dataframe has been modified, write back to csv.
-            data.to_csv(base_file,index=False)
+                        if " "+field in data.columns:
+                            field_modified = " "+field
+                        else:
+                            field_modified = field
+                        delta = columns[base_file][field][0][i-1]
+                        if (columns[base_file][field][1]=="add"):
+                            data[field_modified]=data[field_modified].apply(lambda val:val+delta)
+                        elif (columns[base_file][field][1]=="sub"):
+                            data[base_file][field_modified]=data[field_modified].apply(lambda val:val-delta)
+                        elif (columns[base_file][field][1]=="mul"):
+                            data[field_modified]=data[field_modified].apply(lambda val:val*delta)
+                        elif (columns[base_file][field][1]=="div"):
+                            data[field_modified]=data[field_modified].apply(lambda val:val/delta)
+                        # make note of modified changes in a list datastructure
+                        summary[i-1].append(field) # append column_name
+                        summary[i-1].append(columns[base_file][field][2]) # append distribution
+                        summary[i-1].append(columns[base_file][field][1]) # append operation
+                        summary[i-1].append(str(delta)) # append delta
+                    # at this point the dataframe has been modified, write back to csv.
+                data.to_csv(base_file,index=False)     
+        print str(summary)
         # write summary of modifications to a file.
         result_summary = open(os.path.join(base_folder,"sim_summary.csv"),'wb')
         wr = csv.writer(result_summary,dialect='excel')
@@ -278,6 +294,9 @@ def handle_special_job(task, rscript):
             os.chdir(scripts_dir)
             shutil.copy(os.path.join(current_dir, "Filters", filename),os.getcwd())
             os.rename(filename, 'PostProcessFilter.R')
+            filterParamsDir = os.path.join(current_dir, "base_folder", "FilterParams") 
+            if(os.path.exists(filterParamsDir)):
+                shutil.copy(os.path.join(filterParamsDir, "FilterParams.json"),os.getcwd())
             os.chdir(current_dir)
 
         # execute graple job
