@@ -70,8 +70,9 @@ def setup_graple(path,filename, rscript):
         shutil.copy(os.path.join(topdir, "Filters", filename),os.getcwd())
         os.rename(filename, 'PostProcessFilter.R')
         filterParamsDir = os.path.join(topdir, "Sims", "FilterParams")
-        if(os.path.join(filterParamsDir)):
+        if(os.path.exists(filterParamsDir)):
             shutil.copy(os.path.join(filterParamsDir, "FilterParams.json"), os.getcwd())
+            shutil.rmtree(filterParamsDir) 
     os.chdir(topdir) 
     
 def execute_graple(path):
@@ -216,9 +217,9 @@ def handle_special_job(task, rscript):
         summary = []
         columns = {}
         noOfFiles = len(jsondata["ExpFiles"]) 
+        base_iterations = jsondata["num_iterations"]
         for i in range(0, noOfFiles):
             base_file = jsondata["ExpFiles"][i]["driverfile"]
-            base_iterations = jsondata["ExpFiles"][i]["num_iterations"]
             variables = jsondata["ExpFiles"][i]["variables"][0]
             for key, value in variables.iteritems():
                 variable = key
@@ -514,11 +515,11 @@ def get_PPOLibrary_scripts():
 
 @app.route('/GrapleGetVersion', methods=['GET'])
 def get_version():
-    version = {}
+    compatibleGRAPLEVersions = [] 
     if request.method == 'GET':
-        #code for getting the current version of graple service
-        version = {"version": "1.0.2"} 
-    return jsonify(version)
+        #code for getting the compatible versions of GRAPLEr 
+        compatibleGRAPLEVersions.append("2.0.0") 
+        return json.dumps(compatibleGRAPLEVersions)
 
 if __name__ == '__main__':
     app.debug = True
