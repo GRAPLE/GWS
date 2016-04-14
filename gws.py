@@ -303,8 +303,8 @@ def handle_special_job(task, rscript):
         execute_graple(dir_name)
         return
         
-@app.route('/GrapleRunMetSample', defaults={'filtername': None}, methods= ['GET', 'POST'])        
-@app.route('/GrapleRunMetSample/<filtername>', methods= ['GET', 'POST'])        
+@app.route('/GrapleRunMetSample', defaults={'filtername': None}, methods= ['GET', 'POST'])
+@app.route('/GrapleRunMetSample/<filtername>', methods= ['GET', 'POST'])
 def special_batch(filtername):
     global base_upload_path
     if request.method == 'POST':
@@ -393,7 +393,7 @@ def upload_file(filtername):
 
 
 @app.route('/GrapleRunMetOffset', defaults={'filtername': None}, methods= ['GET', 'POST'])
-@app.route('/GrapleRunMetOffset/<filtername>', methods= ['GET', 'POST'])              
+@app.route('/GrapleRunMetOffset/<filtername>', methods= ['GET', 'POST'])
 def run_sweep(filtername):
     global base_upload_path
     if request.method == 'POST':
