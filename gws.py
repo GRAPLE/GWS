@@ -64,6 +64,7 @@ def setup_graple(path,filename, rscript):
     subprocess.call(['tar','xvfz',filename])
     os.remove(filename)
     os.chdir(topdir)
+    print(rscript)
     if(rscript):
         filename = rscript 
         os.chdir("Scripts")
@@ -341,7 +342,7 @@ def check_status(uid):
         status["curr_status"]=check_Job_status(dir_name)
         return jsonify(status)
     
-@app.route('/GrapleAbort/<uid>', methods=['GET','POST'])
+@app.route('/GrapleEnd/<uid>', methods=['GET','POST'])
 def abort_job(uid):
     global base_upload_path
     
