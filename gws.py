@@ -307,19 +307,21 @@ def handle_special_job(task, rscript):
             Sims_dir=os.path.join(dir_name,'Sims')                
             shutil.rmtree(Sims_dir)           
             os.mkdir(Sims_dir) 
-            for j in range(1,base_iterations+1):
-                os.chdir(Sims_dir)
-                new_dir="Sim"+ str(j)
-                if not os.path.exists(new_dir):
-                    summary.append(["sim_"+str(j)])
-                    os.mkdir(new_dir)
-                    os.chdir(new_dir)
-                    shutil.copy(os.path.join(dir_name,'base_folder',filename),os.getcwd())
-                    subprocess.call(['tar','xfz',filename])
-                    os.remove(filename)
-                    os.remove("job_desc.json")
-                else:                
-                    os.chdir(new_dir)    
+        for j in range(1,base_iterations+1):
+            os.chdir(Sims_dir)
+            new_dir="Sim"+ str(j)
+            if not os.path.exists(new_dir):
+                summary.append(["sim_"+str(j)])
+                os.mkdir(new_dir)
+                os.chdir(new_dir)
+                shutil.copy(os.path.join(dir_name,'base_folder',filename),os.getcwd())
+                subprocess.call(['tar','xfz',filename])
+                os.remove(filename)
+                os.remove("job_desc.json")
+            else:                
+                os.chdir(new_dir)    
+            for key in columns.keys():
+                base_file = key
                 data = pandas.read_csv(base_file)
                 data = data.rename(columns=lambda x: x.strip())  
                 for field in columns[base_file].keys():
