@@ -59,7 +59,7 @@ def setup_graple(path,filename, rscript):
     # the contents of tar.gz input should be individual sim folders 
     # check if file ends in tar.gzip if so do tar xvfz filename
     #subprocess.call(['unzip' , filename])
-    subprocess.call(['tar','xvfz',filename])
+    subprocess.call(['tar','xfz',filename])
     os.remove(filename)
     os.chdir(topdir)
     print(rscript)
@@ -158,7 +158,7 @@ def handle_linearsweep_run(task, rscript):
         # unzip the zip file and read job_desc.csv
         os.chdir(base_folder)
         #subprocess.call(['unzip' , filename])
-        subprocess.call(['tar','xvfz',filename])
+        subprocess.call(['tar','xfz',filename])
         # read job description from csv file
         with open('job_desc.json') as data_file:
             jsondata = json.load(data_file)
@@ -205,7 +205,7 @@ def handle_linearsweep_run(task, rscript):
                 os.mkdir(new_dir)
                 os.chdir(new_dir)
                 shutil.copy(os.path.join(dir_name,'base_folder',filename),os.getcwd())
-                subprocess.call(['tar','xvfz',filename])
+                subprocess.call(['tar','xfz',filename])
                 os.remove(filename)
                 os.remove("job_desc.json")
             else:
@@ -275,7 +275,7 @@ def handle_special_job(task, rscript):
         # unzip the zip file and read job_desc.csv
         os.chdir(base_folder)
         #subprocess.call(['unzip' , filename])
-        subprocess.call(['tar','xvfz',filename])
+        subprocess.call(['tar','xfz',filename])
         # read job description from csv file
         with open('job_desc.json') as data_file:    
             jsondata = json.load(data_file)
@@ -315,7 +315,7 @@ def handle_special_job(task, rscript):
                     os.mkdir(new_dir)
                     os.chdir(new_dir)
                     shutil.copy(os.path.join(dir_name,'base_folder',filename),os.getcwd())
-                    subprocess.call(['tar','xvfz',filename])
+                    subprocess.call(['tar','xfz',filename])
                     os.remove(filename)
                     os.remove("job_desc.json")
                 else:                
@@ -339,9 +339,9 @@ def handle_special_job(task, rscript):
                         elif (columns[base_file][field][1]=="div"):
                             data[field_modified]=data[field_modified].apply(lambda val:val/delta)
                         # make note of modified changes in a list datastructure
-                        summary[i-1].append(field) # append column_name
-                        summary[i-1].append(columns[base_file][field][2]) # append distribution
-                        summary[i-1].append(columns[base_file][field][1]) # append operation
+                        summary[j-1].append(field) # append column_name
+                        summary[j-1].append(columns[base_file][field][2]) # append distribution
+                        summary[j-1].append(columns[base_file][field][1]) # append operation
                         summary[i-1].append(str(delta)) # append delta
                     # at this point the dataframe has been modified, write back to csv.
                 data.to_csv(base_file,index=False)     
