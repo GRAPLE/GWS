@@ -89,7 +89,6 @@ def execute_graple(path):
     
        
 def process_graple_results(path):
-    os.chdir(path)
     #subprocess.call(['python','ProcessGrapleBatchOutputs.py'])
     os.chdir(os.path.join(path,'Results'))
     # call tar czf output.tar.gz Sims
@@ -97,7 +96,7 @@ def process_graple_results(path):
     #subprocess.call(['tar','czf','output.tar.gz','Sims'])
     with tarfile.open('output.tar.gz', 'w:gz', compresslevel=9) as tar:
         for f in listdir('.'):
-            if f.endswith('.bz2.tar'):
+            if f.endswith('.bz2.tar') or f == 'sim_summary.csv':
                 tar.add(f)
             #os.remove(f) 
     os.chdir(path)
@@ -197,12 +196,12 @@ def handle_linearsweep_run(task, rscript):
             Sims_dir=os.path.join(dir_name,'Sims')
             shutil.rmtree(Sims_dir)
             os.mkdir(Sims_dir)
+        print base_iterations+1
         for j in range(1,base_iterations+1):
             os.chdir(Sims_dir)
             new_dir="Sim"+ str(j)
             if not os.path.exists(new_dir):
                 summary.append(["sim_"+str(j)])
-                summary.append("\n")
                 os.mkdir(new_dir)
                 os.chdir(new_dir)
                 shutil.copy(os.path.join(dir_name,'base_folder',filename),os.getcwd())
@@ -211,14 +210,13 @@ def handle_linearsweep_run(task, rscript):
                 os.remove("job_desc.json")
             else:
                 os.chdir(new_dir)
-
             for key in columns.keys():
-                base_file = key
+                base_file = key             
                 data = pandas.read_csv(base_file)
                 data = data.rename(columns=lambda x: x.strip())
                 for field in columns[base_file].keys():
                     if (((" "+field) in data.columns) or (field in data.columns)):
-                        # handle variations in filed names in csv file, some field names have leading spaces.
+                    # handle variations in filed names in csv file, some field names have leading spaces.
                         if " "+field in data.columns:
                             field_modified = " "+field
                         else:
@@ -240,7 +238,6 @@ def handle_linearsweep_run(task, rscript):
                         summary[j-1].append(columns[base_file][field][2]) # append distribution
                         summary[j-1].append(columns[base_file][field][1]) # append operation
                         summary[j-1].append(str(delta)) # append delta
-                        summary[j-1].append("\n")
                     # at this point the dataframe has been modified, write back to csv.
                 data.to_csv(base_file,index=False)
         print str(summary)
@@ -342,10 +339,10 @@ def handle_special_job(task, rscript):
                         elif (columns[base_file][field][1]=="div"):
                             data[field_modified]=data[field_modified].apply(lambda val:val/delta)
                         # make note of modified changes in a list datastructure
-                        summary[j-1].append(field) # append column_name
-                        summary[j-1].append(columns[base_file][field][2]) # append distribution
-                        summary[j-1].append(columns[base_file][field][1]) # append operation
-                        summary[j-1].append(str(delta)) # append delta
+                        summary[i-1].append(field) # append column_name
+                        summary[i-1].append(columns[base_file][field][2]) # append distribution
+                        summary[i-1].append(columns[base_file][field][1]) # append operation
+                        summary[i-1].append(str(delta)) # append delta
                     # at this point the dataframe has been modified, write back to csv.
                 data.to_csv(base_file,index=False)     
         print str(summary)
@@ -544,21 +541,14 @@ def return_distributionJob_consolidated_output(uid):
         if not status["curr_status"].startswith("100"):
             ret_dict["status"]="Job under processing,please try agian after some time."
             return jsonify(ret_dict)
-        process_graple_results(dir_name)
         #result_zip = os.path.join(dir_name,'Results','output.zip')
-        result_gz = os.path.join(dir_name,'Results','output.tar.gz')
-        result_ar = os.path.join(dir_name,'Results','output.tar')
         summary_file_path = os.path.join(dir_name,"base_folder","sim_summary.csv")
         # club summary_file to the results
-        shutil.copy(summary_file_path,os.getcwd())
+        shutil.copy(summary_file_path,os.path.join(dir_name,'Results'))
+        process_graple_results(dir_name)
         # use gunzip to unzip
         # 
         #subprocess.call(['zip' ,'-r',result_zip,'sim_summary.csv'])
-        subprocess.call(['gunzip',result_gz])
-        subprocess.call(['tar','rf',result_ar,'sim_summary.csv'])
-        subprocess.call(['gzip',result_ar])
-        os.remove('sim_summary.csv')
-        #output_file = os.path.join(uid,'Results','output.zip')
         output_file=os.path.join(uid,'Results','output.tar.gz')
         url = url_for('static',filename=output_file)
         ret_dict["output_url"]=url
