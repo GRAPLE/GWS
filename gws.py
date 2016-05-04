@@ -342,7 +342,7 @@ def handle_special_job(task, rscript):
                         summary[j-1].append(field) # append column_name
                         summary[j-1].append(columns[base_file][field][2]) # append distribution
                         summary[j-1].append(columns[base_file][field][1]) # append operation
-                        summary[i-1].append(str(delta)) # append delta
+                        summary[j-1].append(str(delta)) # append delta
                     # at this point the dataframe has been modified, write back to csv.
                 data.to_csv(base_file,index=False)     
         print str(summary)
