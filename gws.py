@@ -18,21 +18,25 @@ import tarfile
 from pymongo import MongoClient
 from os import listdir
 import json
+import itertools
 
 # global variables and paths
 base_working_path = '/home/grapleadmin/grapleService/'
-
+ 
 base_upload_path = base_working_path + 'static'
 base_graple_path = base_working_path + 'GRAPLE_SCRIPTS'
 
 app = Flask(__name__, static_url_path='', static_folder = base_upload_path)
 app.config['CELERY_BROKER_URL'] = 'amqp://'
+app.config['MAX_CONTENT_LENGTH'] = 4*1024*1024*1024
 #app.config['CELERY_RESULT_BACKEND'] = 'ampq'
 celery = Celery(app.name, broker=app.config['CELERY_BROKER_URL'])
 celery.conf.update(app.config)
 db_client = MongoClient() # running at default port
 db = db_client.grapleDB
 collection = db.graple_collection
+
+def_SimsPerJob = 5
 
 @celery.task 
 def doTask(task, rscript=''):
@@ -45,6 +49,8 @@ def doTask(task, rscript=''):
         handle_linearsweep_run(task, rscript)
     elif (task.split('$')[0] == "graple_special_batch"):
         handle_special_job(task, rscript)
+    elif (task.split('$')[0] == "gen_run_linear_sweep"):
+        generate_linearsweep_run(task, rscript)
         
 def batch_id_generator(size=40, chars=string.ascii_uppercase + string.digits):
     return ''.join(random.choice(chars) for _ in range(size))
@@ -74,9 +80,13 @@ def setup_graple(path,filename, rscript):
             shutil.rmtree(filterParamsDir) 
     os.chdir(topdir) 
     
-def execute_graple(path):
+def execute_graple(path, SimsPerJob = def_SimsPerJob, force_gen = False):
     os.chdir(path)
-    submit_response_string=subprocess.check_output(['python','SubmitGrapleBatch.py'])
+    if SimsPerJob == def_SimsPerJob and (not force_gen):
+        submit_response_string=subprocess.check_output(['python','SubmitGrapleBatch.py'])
+    else:
+        submit_response_string=subprocess.check_output(['python','SubmitGrapleBatch.py', str(SimsPerJob)])
+
     submitIDList=[]
     for i in submit_response_string.split("\n"):
         if "cluster" in i:
@@ -147,13 +157,127 @@ def ret_distribution_samples(distribution,samples,parameters):
     elif distribution=="linear":
         return np.linspace(parameters[0],parameters[1],samples).tolist()
 
+def generate_linearsweep_run(task, rscript):
+    if (task.split('$')[0] == "gen_run_linear_sweep"):
+        dir_name = task.split('$')[1]
+        filename = task.split('$')[2]
+        sims_per_job = int(task.split('$')[3])
+        print task
+        current_dir = dir_name
+        print current_dir
+        base_folder = os.path.join(dir_name,'base_folder')
+        # unzip the zip file and read job_desc.csv
+        os.chdir(base_folder)
+        #subprocess.call(['unzip' , filename])
+        subprocess.call(['tar','xfz',filename])
+        # read job description from csv file
+        with open('job_desc.json') as data_file:
+            jsondata = json.load(data_file)
+
+        if(rscript):
+            scripts_dir =  os.path.join(current_dir,'Scripts')
+            os.chdir(scripts_dir)
+            print current_dir + "Filters" + rscript
+            shutil.copy(os.path.join(current_dir, "Filters", rscript),os.getcwd())
+            os.rename(rscript, 'PostProcessFilter.R')
+            filterParamsDir = os.path.join(current_dir, "base_folder", "FilterParams") 
+            if(os.path.exists(filterParamsDir)):
+                shutil.copy(os.path.join(filterParamsDir, "FilterParams.json"),os.getcwd())
+            os.chdir(current_dir)
+
+        summary = []
+        columns = {}
+        noOfFiles = len(jsondata["ExpFiles"])
+        base_iterations = 1
+        for i in range(0, noOfFiles):
+            base_file = jsondata["ExpFiles"][i]["driverfile"]
+            variables = jsondata["ExpFiles"][i]["variables"][0]
+            columns[base_file] = {}
+            for key, value in variables.iteritems():
+                variable = key
+                var_distribution = ""
+                var_start_value = 0
+                var_end_value = 0
+                var_operation = ""
+                var_steps = 0
+                if("distribution" in value):
+                    var_distribution = value["distribution"]
+                if("operation" in value):
+                    var_operation = value["operation"]
+                if("start" in value):
+                    var_start_value = value["start"]
+                if("end" in value):
+                    var_end_value = value["end"]
+                if("steps" in value):
+                    var_steps = value["steps"]
+                    var_steps += 1 
+                    base_iterations *= var_steps
+                columns[base_file][variable]=[ret_distribution_samples(var_distribution,var_steps,[var_start_value, var_end_value])]
+                columns[base_file][variable].append(var_operation)
+                columns[base_file][variable].append(var_distribution)
+                columns[base_file][variable].append(var_steps)
+            Sims_dir=os.path.join(dir_name,'Sims')
+            shutil.rmtree(Sims_dir)
+            os.mkdir(Sims_dir)
+        varcomb = []
+        numcomb = []
+        sim_no = 1
+        for jsonfilename, variables in columns.iteritems():
+            for variable, stepValues in variables.iteritems():
+                varcomb.append(jsonfilename +',' + variable + ',' + stepValues[2] + ',' + stepValues[1])
+                numcomb.append(stepValues[0])
+
+        iterprod = list(itertools.product(*numcomb))
+
+            
+        for cc in range(0, len(iterprod), sims_per_job):
+            os.chdir(Sims_dir)
+            new_dir="Sim"+ str(sim_no)
+            if not os.path.exists(new_dir):
+                os.mkdir(new_dir)
+                os.chdir(new_dir)
+                shutil.copy(os.path.join(dir_name,'base_folder',filename),os.getcwd())
+                subprocess.call(['tar','xfz',filename])
+                os.remove(filename)
+                os.remove("job_desc.json")
+            else:
+                os.chdir(new_dir)
+            to_pack = [varcomb, iterprod[cc:cc+sims_per_job]]
+            with open("generate.pickle", "w") as pickf:
+                pickle.dump(to_pack, pickf)
+            for c in range(len(to_pack[1])):
+                row = ["sim_"+str(sim_no), str(c+1)]
+                for i in range(len(varcomb)):
+                    var_list = varcomb[i].split(",")
+                    base_file = var_list[0]
+                    field = var_list[1]
+                    operation = var_list[3]
+                    row.append(field)
+                    row.append(columns[base_file][field][2]) 
+                    row.append(columns[base_file][field][1]) 
+                    row.append(str(to_pack[1][c][i]))
+                summary.append(row)
+            sim_no += 1
+        print str(summary)
+        # write summary of modifications to a file.
+        result_summary = open(os.path.join(base_folder,"sim_summary.csv"),'wb')
+        wr = csv.writer(result_summary,dialect='excel')
+        for row in summary:
+            wr.writerow(row)
+        result_summary.close()
+
+        # execute graple job
+        execute_graple(dir_name, 1, True) # for a generate job, the bundled sims per job is 1, worker expands the single job into many as per sims_per_job
+        return
         
 # handles sweep string cases.    
 def handle_linearsweep_run(task, rscript):
     if (task.split('$')[0] == "run_linear_sweep"):
         dir_name = task.split('$')[1]
         filename = task.split('$')[2]
-        current_dir = os.path.join(os.getcwd(), dir_name)
+        print task
+        current_dir = dir_name
+        print current_dir
         base_folder = os.path.join(dir_name,'base_folder')
         # unzip the zip file and read job_desc.csv
         os.chdir(base_folder)
@@ -193,15 +317,23 @@ def handle_linearsweep_run(task, rscript):
                 columns[base_file][variable].append(var_operation)
                 columns[base_file][variable].append(var_distribution)
                 columns[base_file][variable].append(var_steps)
-            Sims_dir=os.path.join(dir_name,'Sims')
+        Sims_dir=os.path.join(dir_name,'Sims')
+        if os.path.exists(Sims_dir):
             shutil.rmtree(Sims_dir)
-            os.mkdir(Sims_dir)
-        print base_iterations+1
-        for j in range(1,base_iterations+1):
+        os.mkdir(Sims_dir)
+        varcomb = []
+        numcomb = []
+        sim_no = 1
+        for jsonfilename, variables in columns.iteritems():
+            for variable, stepValues in variables.iteritems():
+                varcomb.append(jsonfilename +',' + variable + ',' + stepValues[2] + ',' + stepValues[1])
+                numcomb.append(stepValues[0])
+
+        for comb in itertools.product(*numcomb):
             os.chdir(Sims_dir)
-            new_dir="Sim"+ str(j)
+            new_dir="Sim"+ str(sim_no)
             if not os.path.exists(new_dir):
-                summary.append(["sim_"+str(j)])
+                summary.append(["sim_"+str(sim_no)])
                 os.mkdir(new_dir)
                 os.chdir(new_dir)
                 shutil.copy(os.path.join(dir_name,'base_folder',filename),os.getcwd())
@@ -210,36 +342,34 @@ def handle_linearsweep_run(task, rscript):
                 os.remove("job_desc.json")
             else:
                 os.chdir(new_dir)
-            for key in columns.keys():
-                base_file = key             
+            for i in range(len(varcomb)):
+                var_list = varcomb[i].split(",")
+                base_file = var_list[0]
+                field = var_list[1]
+                operation = var_list[3]
+                delta = comb[i]
                 data = pandas.read_csv(base_file)
                 data = data.rename(columns=lambda x: x.strip())
-                for field in columns[base_file].keys():
-                    if (((" "+field) in data.columns) or (field in data.columns)):
-                    # handle variations in filed names in csv file, some field names have leading spaces.
-                        if " "+field in data.columns:
-                            field_modified = " "+field
-                        else:
-                            field_modified = field
-                        stepValue = j % int(columns[base_file][field][3])
-                        if stepValue == 0:
-                            stepValue = columns[base_file][field][3]
-                        delta = columns[base_file][field][0][stepValue-1]
-                        if (columns[base_file][field][1]=="add"):
-                            data[field_modified]=data[field_modified].apply(lambda val:val+delta)
-                        elif (columns[base_file][field][1]=="sub"):
-                            data[base_file][field_modified]=data[field_modified].apply(lambda val:val-delta)
-                        elif (columns[base_file][field][1]=="mul"):
-                            data[field_modified]=data[field_modified].apply(lambda val:val*delta)
-                        elif (columns[base_file][field][1]=="div"):
-                            data[field_modified]=data[field_modified].apply(lambda val:val/delta)
-                        # make note of modified changes in a list datastructure
-                        summary[j-1].append(field) # append column_name
-                        summary[j-1].append(columns[base_file][field][2]) # append distribution
-                        summary[j-1].append(columns[base_file][field][1]) # append operation
-                        summary[j-1].append(str(delta)) # append delta
-                    # at this point the dataframe has been modified, write back to csv.
+                if (((" "+field) in data.columns) or (field in data.columns)):
+                # handle variations in filed names in csv file, some field names have leading spaces.
+                    if " "+field in data.columns:
+                        field_modified = " "+field
+                    else:
+                        field_modified = field
+                if (operation=="add"):
+                    data[field_modified]=data[field_modified].apply(lambda val:val+delta)
+                elif (operation=="sub"):
+                    data[base_file][field_modified]=data[field_modified].apply(lambda val:val-delta)
+                elif (operation=="mul"):
+                    data[field_modified]=data[field_modified].apply(lambda val:val*delta)
+                elif (operation=="div"):
+                    data[field_modified]=data[field_modified].apply(lambda val:val/delta)
+                summary[sim_no - 1].append(field)
+                summary[sim_no - 1].append(columns[base_file][field][2]) 
+                summary[sim_no - 1].append(columns[base_file][field][1]) 
+                summary[sim_no - 1].append(str(delta))
                 data.to_csv(base_file,index=False)
+            sim_no += 1
         print str(summary)
         # write summary of modifications to a file.
         result_summary = open(os.path.join(base_folder,"sim_summary.csv"),'wb')
@@ -319,9 +449,9 @@ def handle_special_job(task, rscript):
                 os.remove(filename)
                 os.remove("job_desc.json")
             else:                
-                os.chdir(new_dir)
+                os.chdir(new_dir)    
             for key in columns.keys():
-                base_file = key
+                base_file = key             
                 data = pandas.read_csv(base_file)
                 data = data.rename(columns=lambda x: x.strip())  
                 for field in columns[base_file].keys():
@@ -399,8 +529,9 @@ def special_batch(filtername):
         return jsonify(response)
 
 @app.route('/GrapleRunLinearSweep', defaults={'filtername': None}, methods= ['GET', 'POST'])
-@app.route('/GrapleRunLinearSweep/<filtername>', methods= ['GET', 'POST'])
-def linear_sweep(filtername):
+@app.route('/GrapleRunLinearSweep/<filtername>', defaults={'sims_per_job': None}, methods= ['GET', 'POST'])
+@app.route('/GrapleRunLinearSweep/<filtername>/<int:sims_per_job>', methods=['GET', 'POST'])
+def linear_sweep(filtername, sims_per_job):
     global base_upload_path
     if request.method == 'POST':
         f = request.files['files']
@@ -417,7 +548,10 @@ def linear_sweep(filtername):
         copy_tree(base_graple_path,topdir)
         subprocess.call(['python' , 'CreateWorkingFolders.py'])
         # have to submit job to celery here--below method has to be handled by celery worker
-        task_desc = "run_linear_sweep"+"$"+dir_name+"$"+filename
+        if(sims_per_job):
+            task_desc = "gen_run_linear_sweep"+"$"+dir_name+"$"+filename+"$"+str(sims_per_job)
+        else:
+            task_desc = "run_linear_sweep"+"$"+dir_name+"$"+filename
         if(filtername):
             doTask.delay(task_desc, filtername)
         else:
