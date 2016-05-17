@@ -80,17 +80,15 @@ def setup_graple(path,filename, rscript):
     #subprocess.call(['unzip' , filename])
     subprocess.call(['tar','xfz',filename])
     os.remove(filename)
-    os.chdir(topdir)
+    os.chdir(topdir) # required?
     if(rscript):
-        filename = rscript 
-        os.chdir("Scripts")
-        shutil.copy(os.path.join(topdir, "Filters", filename),os.getcwd())
-        os.rename(filename, 'PostProcessFilter.R')
+        filter_fn = os.path.join(topdir, "Filters", rscript)
+        if(os.path.isfile(filter_fn)):
+            shutil.copy(filter_fn, os.path.join(topdir, "Scripts", "PostProcessFilter.R"))
         filterParamsDir = os.path.join(topdir, "Sims", "FilterParams")
         if(os.path.exists(filterParamsDir)):
-            shutil.copy(os.path.join(filterParamsDir, "FilterParams.json"), os.getcwd())
-            shutil.rmtree(filterParamsDir) 
-    os.chdir(topdir) 
+            shutil.copy(os.path.join(filterParamsDir, "FilterParams.json"), os.path.join(topdir,"Scripts"))
+            shutil.rmtree(filterParamsDir)
     
 def execute_graple(path, SimsPerJob = def_SimsPerJob, force_gen = False):
     os.chdir(path)
@@ -627,6 +625,7 @@ def special_batch(filtername, sims_per_job):
         else:
             task_desc = "graple_special_batch" + "$" + dir_name + "$" + filename
         if(filtername):
+            filtername += '.R'
             doTask.delay(task_desc, filtername)
         else:
             doTask.delay(task_desc)
@@ -658,6 +657,7 @@ def linear_sweep(filtername, sims_per_job):
         else:
             task_desc = "run_linear_sweep"+"$"+dir_name+"$"+filename
         if(filtername):
+            filtername += '.R'
             doTask.delay(task_desc, filtername)
         else:
             doTask.delay(task_desc)
@@ -684,27 +684,6 @@ def abort_job(uid):
         status["curr_status"]=Abort_Job(dir_name)
         return jsonify(status)
 
-@app.route('/TriggerSimulation/<sweepstring>', methods=['GET','POST']) # not being used
-def return_file(sweepstring):
-    global base_upload_path
-    base_params = sweepstring.split("*")
-    uid=base_params[0]
-    if request.method == 'GET':
-        dir_name = os.path.join(base_upload_path,str(uid))
-        os.chdir(dir_name)
-        contents = {}
-        for each in os.listdir(dir_name):
-            contents[each] = os.path.getsize(each)
-        return jsonify(contents)
-    
-    if request.method == 'POST':
-        dir_name = os.path.join(base_upload_path,str(uid))
-        # put the task in the queue in the required format
-        task_desc = "run_sweep"+"$"+dir_name+"$"+sweepstring
-        doTask.delay(task_desc)
-        response = {"response":"Job put in the task queue"}    
-        return jsonify(response)
-        
 @app.route('/GrapleRun', defaults={'filtername': None}, methods= ['GET', 'POST'])
 @app.route('/GrapleRun/<filtername>', methods= ['GET', 'POST'])
 def upload_file(filtername):
@@ -720,36 +699,12 @@ def upload_file(filtername):
         # should put the task in queue here and return.
         task_desc = "graple_run_batch"+"$"+dir_name+"$"+filename
         if (filtername): 
+            filtername += '.R'
             doTask.delay(task_desc, filtername)
         else:  
             doTask.delay(task_desc)  
         return jsonify(response)
 
-
-@app.route('/GrapleRunMetOffset', defaults={'filtername': None}, methods= ['GET', 'POST']) # not being used
-@app.route('/GrapleRunMetOffset/<filtername>', methods= ['GET', 'POST'])
-def run_sweep(filtername):
-    global base_upload_path
-    if request.method == 'POST':
-        f = request.files['files']
-        filename = f.filename
-        response = {"uid":batch_id_generator()}
-        dir_name = os.path.join(base_upload_path,response["uid"])
-        os.mkdir(dir_name)
-        base_folder = os.path.join(dir_name,'base_folder')
-        os.mkdir(base_folder)
-        topdir = dir_name
-        os.chdir(base_folder)
-        f.save(filename)
-        os.chdir(topdir)
-        copy_tree(base_graple_path,topdir)
-        subprocess.call(['python' , 'CreateWorkingFolders.py'])
-        if(filtername):      
-            os.chdir("Scripts")
-    	    shutil.copy(os.path.join(topdir,filtername),os.getcwd())      
-            os.chdir(topdir)
-        return jsonify(response)
-      
 @app.route('/GrapleRunResults/<uid>', methods=['GET','POST'])
 def return_consolidated_output(uid):
     global base_upload_path
@@ -762,6 +717,9 @@ def return_consolidated_output(uid):
         if not status["curr_status"].startswith("100"):
             ret_dict["status"]="Job under processing,please try agian after some time."
             return jsonify(ret_dict)
+        summary_file = os.path.join(dir_name,"base_folder","sim_summary.csv")
+        if os.path.isfile(summary_file):
+            shutil.copy(summary_file,os.path.join(dir_name,'Results'))
         process_graple_results(dir_name)
         #output_file = os.path.join(uid,'Results','output.zip')
         output_file = os.path.join(uid,'Results','output.tar.gz')
@@ -769,33 +727,6 @@ def return_consolidated_output(uid):
         ret_dict["output_url"]=url
         ret_dict["status"]="success"
         return jsonify(ret_dict)
-        
-@app.route('/GrapleRunResultsMetSample/<uid>', methods=['GET','POST'])
-def return_distributionJob_consolidated_output(uid):
-    global base_upload_path
-    ret_dict = {}
-    if request.method == 'GET':
-        dir_name = os.path.join(base_upload_path,uid)
-        # Sanity check to ensure that job processing is completed.
-        status = {}
-        status["curr_status"] = check_Job_status(dir_name)
-        if not status["curr_status"].startswith("100"):
-            ret_dict["status"]="Job under processing,please try agian after some time."
-            return jsonify(ret_dict)
-        #result_zip = os.path.join(dir_name,'Results','output.zip')
-        summary_file_path = os.path.join(dir_name,"base_folder","sim_summary.csv")
-        # club summary_file to the results
-        shutil.copy(summary_file_path,os.path.join(dir_name,'Results'))
-        process_graple_results(dir_name)
-        # use gunzip to unzip
-        # 
-        #subprocess.call(['zip' ,'-r',result_zip,'sim_summary.csv'])
-        output_file=os.path.join(uid,'Results','output.tar.gz')
-        url = url_for('static',filename=output_file)
-        ret_dict["output_url"]=url
-        ret_dict["status"]="success"
-        return jsonify(ret_dict)
-
         
 @app.route('/download_file/<request_string>', methods=['GET','POST'])
 def return_requested_file(request_string):
@@ -836,7 +767,7 @@ def get_PPOLibrary_scripts():
     if request.method == 'GET':
         scriptsDir = os.path.join(base_graple_path, "Filters")
         if(os.path.exists(scriptsDir)):
-            filesList = os.listdir(scriptsDir) 
+            filesList = [os.path.splitext(filtername)[0] for filtername in os.listdir(scriptsDir)]
     return json.dumps(filesList)        
 
 @app.route('/GrapleGetVersion', methods=['GET'])
