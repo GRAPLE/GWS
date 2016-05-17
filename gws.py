@@ -6,13 +6,14 @@ import signal
 import pandas
 from flask import Flask, request, redirect, url_for,jsonify,send_from_directory
 from werkzeug import secure_filename
-import string,random,shutil,pickle
+import string,random,shutil
 from distutils.dir_util import copy_tree
 from os.path import join
 import subprocess,os
 from flask import Flask
 from flask import request
 from celery import Celery
+import celery.signals
 import pymongo
 import tarfile
 from pymongo import MongoClient
@@ -28,17 +29,24 @@ base_graple_path = base_working_path + 'GRAPLE_SCRIPTS'
 
 app = Flask(__name__, static_url_path='', static_folder = base_upload_path)
 app.config['CELERY_BROKER_URL'] = 'amqp://'
-app.config['MAX_CONTENT_LENGTH'] = 4*1024*1024*1024
+app.config['CELERY_ACCEPT_CONTENT'] = ['json']
+app.config['CELERY_TASK_SERIALIZER'] = 'json'
+app.config['CELERY_RESULT_SERIALIZER'] = 'json'
 #app.config['CELERY_RESULT_BACKEND'] = 'ampq'
-celery = Celery(app.name, broker=app.config['CELERY_BROKER_URL'])
-celery.conf.update(app.config)
-db_client = MongoClient() # running at default port
+celeryob = Celery(app.name, broker=app.config['CELERY_BROKER_URL'])
+celeryob.conf.update(app.config)
+db_client = MongoClient(connect = False) # running at default port
 db = db_client.grapleDB
 collection = db.graple_collection
 
-def_SimsPerJob = 5
+def_SimsPerJob = 5 # can automatically read from Graple.py if required
+def_id_size = 40
 
-@celery.task 
+@celery.signals.worker_process_init.connect()
+def seed_rand(**_): # makes sure different celery workers generate different random numbers
+    np.random.seed()
+
+@celeryob.task 
 def doTask(task, rscript=''):
     if (task.split('$')[0] == "graple_run_batch"):
         dir_name = task.split('$')[1]
@@ -51,9 +59,14 @@ def doTask(task, rscript=''):
         handle_special_job(task, rscript)
     elif (task.split('$')[0] == "gen_run_linear_sweep"):
         generate_linearsweep_run(task, rscript)
+    elif (task.split('$')[0] == "gen_graple_special_batch"):
+        generate_special_job(task, rscript)
         
-def batch_id_generator(size=40, chars=string.ascii_uppercase + string.digits):
-    return ''.join(random.choice(chars) for _ in range(size))
+def batch_id_generator(size=def_id_size, chars=string.ascii_uppercase + string.digits):
+    bid = ''.join(random.choice(chars) for _ in range(size))
+    while collection.find_one({'key':bid}) != None:
+        bid = ''.join(random.choice(chars) for _ in range(size))
+    return bid
 
 def setup_graple(path,filename, rscript):
     copy_tree(base_graple_path,path)
@@ -68,7 +81,6 @@ def setup_graple(path,filename, rscript):
     subprocess.call(['tar','xfz',filename])
     os.remove(filename)
     os.chdir(topdir)
-    print(rscript)
     if(rscript):
         filename = rscript 
         os.chdir("Scripts")
@@ -92,7 +104,7 @@ def execute_graple(path, SimsPerJob = def_SimsPerJob, force_gen = False):
         if "cluster" in i:
             submitIDList.append(i.split(" ")[5].split(".")[0])
     try:
-        payload = {'key':str(path),'payload':pickle.dumps(submitIDList)}
+        payload = {'key':path[-def_id_size:],'payload':submitIDList}
         collection.insert_one(payload)
     except:
         print("Error in db access in execute_graple")
@@ -113,9 +125,9 @@ def process_graple_results(path):
     
 def check_Job_status(path):
     os.chdir(path)
-    query = {'key':str(path)}
+    query = {'key':path[-def_id_size:]}
     try:
-        submitIDList = pickle.loads(collection.find_one(query)['payload'])
+        submitIDList = collection.find_one(query)['payload']
     except:
         print ("error in db access in check_job_status")
         return "Job submission to Condor pool in progress."
@@ -126,25 +138,19 @@ def check_Job_status(path):
 
 def Abort_Job(path):
     os.chdir(path)
-    query = {'key':str(path)}
+    query = {'key':path[-def_id_size:]}
     try:
-        submitIDList = pickle.loads(collection.find_one(query)['payload'])
+        submitIDList = collection.find_one(query)['payload']
     except:
         print ("error in db access in Abort")
         return "Job submission to Condor pool is in progress., try again once \
         all jobs are submitted"
-    for each in submitIDList:
-        try:
-            cout = subprocess.check_output(['condor_rm', each])
-        except:
-            pass
+    condor_command = ['condor_rm'] + map(str, submitIDList)
+    cout = subprocess.check_output(condor_command)
     return "All jobs marked for removal"
         
 def ret_distribution_samples(distribution,samples,parameters):
     parameters = map(float,parameters)
-        
-    for each in parameters:
-        print ("value:%s Type:%s length:%s"%(each,type(each),len(parameters)))
         
     if distribution=="uniform":
         return np.random.uniform(parameters[0],parameters[1],samples).tolist()
@@ -162,9 +168,7 @@ def generate_linearsweep_run(task, rscript):
         dir_name = task.split('$')[1]
         filename = task.split('$')[2]
         sims_per_job = int(task.split('$')[3])
-        print task
         current_dir = dir_name
-        print current_dir
         base_folder = os.path.join(dir_name,'base_folder')
         # unzip the zip file and read job_desc.csv
         os.chdir(base_folder)
@@ -177,7 +181,6 @@ def generate_linearsweep_run(task, rscript):
         if(rscript):
             scripts_dir =  os.path.join(current_dir,'Scripts')
             os.chdir(scripts_dir)
-            print current_dir + "Filters" + rscript
             shutil.copy(os.path.join(current_dir, "Filters", rscript),os.getcwd())
             os.rename(rscript, 'PostProcessFilter.R')
             filterParamsDir = os.path.join(current_dir, "base_folder", "FilterParams") 
@@ -216,9 +219,9 @@ def generate_linearsweep_run(task, rscript):
                 columns[base_file][variable].append(var_operation)
                 columns[base_file][variable].append(var_distribution)
                 columns[base_file][variable].append(var_steps)
-            Sims_dir=os.path.join(dir_name,'Sims')
-            shutil.rmtree(Sims_dir)
-            os.mkdir(Sims_dir)
+        Sims_dir=os.path.join(dir_name,'Sims')
+        #shutil.rmtree(Sims_dir)
+        #os.mkdir(Sims_dir)
         varcomb = []
         numcomb = []
         sim_no = 1
@@ -243,8 +246,8 @@ def generate_linearsweep_run(task, rscript):
             else:
                 os.chdir(new_dir)
             to_pack = [varcomb, iterprod[cc:cc+sims_per_job]]
-            with open("generate.pickle", "w") as pickf:
-                pickle.dump(to_pack, pickf)
+            with open("generate.json", "w") as pickf:
+                json.dump(to_pack, pickf)
             for c in range(len(to_pack[1])):
                 row = ["sim_"+str(sim_no), str(c+1)]
                 for i in range(len(varcomb)):
@@ -258,7 +261,6 @@ def generate_linearsweep_run(task, rscript):
                     row.append(str(to_pack[1][c][i]))
                 summary.append(row)
             sim_no += 1
-        print str(summary)
         # write summary of modifications to a file.
         result_summary = open(os.path.join(base_folder,"sim_summary.csv"),'wb')
         wr = csv.writer(result_summary,dialect='excel')
@@ -275,9 +277,7 @@ def handle_linearsweep_run(task, rscript):
     if (task.split('$')[0] == "run_linear_sweep"):
         dir_name = task.split('$')[1]
         filename = task.split('$')[2]
-        print task
         current_dir = dir_name
-        print current_dir
         base_folder = os.path.join(dir_name,'base_folder')
         # unzip the zip file and read job_desc.csv
         os.chdir(base_folder)
@@ -318,9 +318,9 @@ def handle_linearsweep_run(task, rscript):
                 columns[base_file][variable].append(var_distribution)
                 columns[base_file][variable].append(var_steps)
         Sims_dir=os.path.join(dir_name,'Sims')
-        if os.path.exists(Sims_dir):
-            shutil.rmtree(Sims_dir)
-        os.mkdir(Sims_dir)
+        #if os.path.exists(Sims_dir):
+        #    shutil.rmtree(Sims_dir)
+        #os.mkdir(Sims_dir)
         varcomb = []
         numcomb = []
         sim_no = 1
@@ -370,7 +370,6 @@ def handle_linearsweep_run(task, rscript):
                 summary[sim_no - 1].append(str(delta))
                 data.to_csv(base_file,index=False)
             sim_no += 1
-        print str(summary)
         # write summary of modifications to a file.
         result_summary = open(os.path.join(base_folder,"sim_summary.csv"),'wb')
         wr = csv.writer(result_summary,dialect='excel')
@@ -392,6 +391,109 @@ def handle_linearsweep_run(task, rscript):
 
         # execute graple job
         execute_graple(dir_name)
+        return
+
+def generate_special_job(task, rscript):
+    if (task.split('$')[0] == "gen_graple_special_batch"):
+        dir_name = task.split('$')[1]
+        filename = task.split('$')[2]
+        sims_per_job = int(task.split('$')[3])
+        current_dir = os.path.join(os.getcwd(), dir_name) 
+        base_folder = os.path.join(dir_name,'base_folder')
+        # unzip the zip file and read job_desc.csv
+        os.chdir(base_folder)
+        #subprocess.call(['unzip' , filename])
+        subprocess.call(['tar','xfz',filename])
+        # read job description from csv file
+        with open('job_desc.json') as data_file:    
+            jsondata = json.load(data_file)
+
+        if(rscript):
+            scripts_dir =  os.path.join(current_dir,'Scripts')
+            os.chdir(scripts_dir)
+            shutil.copy(os.path.join(current_dir, "Filters", rscript), os.getcwd())
+            os.rename(rscript, 'PostProcessFilter.R')
+            filterParamsDir = os.path.join(current_dir, "base_folder", "FilterParams") 
+            if(os.path.exists(filterParamsDir)):
+                shutil.copy(os.path.join(filterParamsDir, "FilterParams.json"),os.getcwd())
+            os.chdir(current_dir)
+
+        summary = []
+        columns = {}
+        noOfFiles = len(jsondata["ExpFiles"]) 
+        base_iterations = jsondata["num_iterations"]
+        for i in range(0, noOfFiles):
+            base_file = jsondata["ExpFiles"][i]["driverfile"]
+            variables = jsondata["ExpFiles"][i]["variables"][0]
+            columns[base_file] = {}
+            for key, value in variables.iteritems():
+                variable = key
+                var_distribution = ""
+                var_start_value = 0
+                var_end_value = 0
+                var_operation = ""
+                if("distribution" in value):
+                    var_distribution = value["distribution"]
+                if("operation" in value):
+                    var_operation = value["operation"]                  
+                if("start" in value):
+                    var_start_value = value["start"]
+                if("end" in value):
+                    var_end_value = value["end"]    
+                columns[base_file][variable]=[ret_distribution_samples(var_distribution,base_iterations,[var_start_value, var_end_value])]
+                columns[base_file][variable].append(var_operation)
+                columns[base_file][variable].append(var_distribution)
+        Sims_dir=os.path.join(dir_name,'Sims')
+        #shutil.rmtree(Sims_dir)           
+        #os.mkdir(Sims_dir)
+        varcomb = []
+        numcomb = []
+        sim_no = 1
+        for jsonfilename, variables in columns.iteritems():
+            for variable, stepValues in variables.iteritems():
+                varcomb.append(jsonfilename + ',' + variable + ',' + stepValues[2] + ',' + stepValues[1])
+                numcomb.append(stepValues[0])
+
+        iterprod = list(zip(*numcomb))
+
+        for cc in range(0, len(iterprod), sims_per_job):
+            os.chdir(Sims_dir)
+            new_dir="Sim"+ str(sim_no)
+            if not os.path.exists(new_dir):
+                os.mkdir(new_dir)
+                os.chdir(new_dir)
+                shutil.copy(os.path.join(dir_name,'base_folder',filename),os.getcwd())
+                subprocess.call(['tar','xfz',filename])
+                os.remove(filename)
+                os.remove("job_desc.json")
+            else:
+                os.chdir(new_dir)
+            to_pack = [varcomb, iterprod[cc:cc+sims_per_job]]
+            with open("generate.json", "w") as pickf:
+                json.dump(to_pack, pickf)
+            for c in range(len(to_pack[1])):
+                row = ["sim_"+str(sim_no), str(c+1)]
+                for i in range(len(varcomb)):
+                    var_list = varcomb[i].split(",")
+                    base_file = var_list[0]
+                    field = var_list[1]
+                    operation = var_list[3]
+                    row.append(field)
+                    row.append(columns[base_file][field][2]) 
+                    row.append(columns[base_file][field][1]) 
+                    row.append(str(to_pack[1][c][i]))
+                summary.append(row)
+            sim_no += 1
+        # write summary of modifications to a file.
+        result_summary = open(os.path.join(base_folder,"sim_summary.csv"),'wb')
+        wr = csv.writer(result_summary,dialect='excel')
+        for row in summary:
+            wr.writerow(row)
+        result_summary.close()
+
+
+        # execute graple job
+        execute_graple(dir_name, 1, True)
         return
 
 # handles the core of distribution sweep jobs.
@@ -435,8 +537,8 @@ def handle_special_job(task, rscript):
                 columns[base_file][variable].append(var_operation)
                 columns[base_file][variable].append(var_distribution)
             Sims_dir=os.path.join(dir_name,'Sims')                
-            shutil.rmtree(Sims_dir)           
-            os.mkdir(Sims_dir) 
+            #shutil.rmtree(Sims_dir)           
+            #os.mkdir(Sims_dir) 
         for j in range(1,base_iterations+1):
             os.chdir(Sims_dir)
             new_dir="Sim"+ str(j)
@@ -477,7 +579,6 @@ def handle_special_job(task, rscript):
                         summary[j-1].append(str(delta)) # append delta
                     # at this point the dataframe has been modified, write back to csv.
                 data.to_csv(base_file,index=False)     
-        print str(summary)
         # write summary of modifications to a file.
         result_summary = open(os.path.join(base_folder,"sim_summary.csv"),'wb')
         wr = csv.writer(result_summary,dialect='excel')
@@ -501,9 +602,10 @@ def handle_special_job(task, rscript):
         execute_graple(dir_name)
         return
         
-@app.route('/GrapleRunMetSample', defaults={'filtername': None}, methods= ['GET', 'POST'])
-@app.route('/GrapleRunMetSample/<filtername>', methods= ['GET', 'POST'])
-def special_batch(filtername):
+@app.route('/GrapleRunMetSample', defaults={'filtername': None, 'sims_per_job':None}, methods= ['GET', 'POST'])
+@app.route('/GrapleRunMetSample/<filtername>', defaults = {'sims_per_job':None}, methods= ['GET', 'POST'])
+@app.route('/GrapleRunMetSample/<filtername>/<int:sims_per_job>', methods= ['GET', 'POST'])
+def special_batch(filtername, sims_per_job):
     global base_upload_path
     if request.method == 'POST':
         f = request.files['files']
@@ -520,7 +622,10 @@ def special_batch(filtername):
         copy_tree(base_graple_path,topdir)
         subprocess.call(['python' , 'CreateWorkingFolders.py'])
         # have to submit job to celery here--below method has to be handled by celery worker
-        task_desc = "graple_special_batch"+"$"+dir_name+"$"+filename
+        if(sims_per_job):
+            task_desc = "gen_graple_special_batch" + "$" + dir_name + "$" + filename + "$" + str(sims_per_job)
+        else:
+            task_desc = "graple_special_batch" + "$" + dir_name + "$" + filename
         if(filtername):
             doTask.delay(task_desc, filtername)
         else:
@@ -528,7 +633,7 @@ def special_batch(filtername):
         response["status"] = "Job submitted to task queue"
         return jsonify(response)
 
-@app.route('/GrapleRunLinearSweep', defaults={'filtername': None}, methods= ['GET', 'POST'])
+@app.route('/GrapleRunLinearSweep', defaults={'filtername': None, 'sims_per_job': None}, methods= ['GET', 'POST'])
 @app.route('/GrapleRunLinearSweep/<filtername>', defaults={'sims_per_job': None}, methods= ['GET', 'POST'])
 @app.route('/GrapleRunLinearSweep/<filtername>/<int:sims_per_job>', methods=['GET', 'POST'])
 def linear_sweep(filtername, sims_per_job):
@@ -579,7 +684,7 @@ def abort_job(uid):
         status["curr_status"]=Abort_Job(dir_name)
         return jsonify(status)
 
-@app.route('/TriggerSimulation/<sweepstring>', methods=['GET','POST'])
+@app.route('/TriggerSimulation/<sweepstring>', methods=['GET','POST']) # not being used
 def return_file(sweepstring):
     global base_upload_path
     base_params = sweepstring.split("*")
@@ -621,7 +726,7 @@ def upload_file(filtername):
         return jsonify(response)
 
 
-@app.route('/GrapleRunMetOffset', defaults={'filtername': None}, methods= ['GET', 'POST'])
+@app.route('/GrapleRunMetOffset', defaults={'filtername': None}, methods= ['GET', 'POST']) # not being used
 @app.route('/GrapleRunMetOffset/<filtername>', methods= ['GET', 'POST'])
 def run_sweep(filtername):
     global base_upload_path
