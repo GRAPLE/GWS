@@ -1,4 +1,6 @@
 #!/bin/bash
 
-ps auxww | grep 'celeryob worker' | awk '{print $2}' | xargs kill
-ps aux | grep 'gws.py' | awk '{print $2}' | xargs kill
+pgrep -f 'celeryob worker' | xargs kill
+pgrep -f 'gws.py' | xargs kill
+pgrep -f 'ems.py' | xargs kill
+ps -ef | grep 'ems.py'
