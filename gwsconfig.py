@@ -14,4 +14,5 @@ gwsconf = {
     'retention_after_dl' : datetime.timedelta(hours = 1),
     'graple_db_name' : 'grapleDB',
     'graple_coll_name' : 'grapleColl',
+    'api_coll_name' : 'grapleAPI',
 }
