@@ -2,6 +2,7 @@
 import datetime
 
 gwsconf = {
+    'debug' : True,
     'refresh_delay' : datetime.timedelta(seconds = 30),
     'smtp_server' : 'smtp.gmail.com:587',
     'smtp_user' : 'example',

@@ -3,12 +3,10 @@
 import os, time, csv, signal, pandas, string, random, shutil, subprocess, tarfile, json, itertools, datetime, flask
 import numpy as np
 import celery.signals
-from flask import Flask, request, redirect, url_for, jsonify, send_from_directory
-from werkzeug import secure_filename
+from flask import Flask, request, redirect, url_for, jsonify
 from distutils.dir_util import copy_tree
 from celery import Celery
 from pymongo import MongoClient
-from os import listdir
 from gwsconfig import gwsconf
 
 # global variables and paths
@@ -31,9 +29,9 @@ celeryob.conf.update(app.config)
 db_client = MongoClient(connect = False) # running at default port
 db = db_client[gwsconf['graple_db_name']]
 collection = db[gwsconf['graple_coll_name']]
+apicoll = db[gwsconf['api_coll_name']]
 
 def_SimsPerJob = 5 # can automatically read from Graple.py if required
-def_id_size = 40
 
 # mongodb document
 # { 'key': the uid of the experiment 
@@ -69,11 +67,58 @@ def doTask(task, rscript = None):
     if task[0] in func_dict:
         func_dict[task[0]](task, rscript)
     
-def batch_id_generator(size = def_id_size, chars = string.ascii_uppercase + string.digits):
+def batch_id_generator(size = 40, chars = string.ascii_uppercase + string.digits):
     bid = ''.join(random.choice(chars) for _ in range(size))
     while collection.find_one({'key':bid}) != None:
         bid = ''.join(random.choice(chars) for _ in range(size))
     return bid
+
+def ret_distribution_samples(distribution,samples,parameters):
+    parameters = map(float,parameters)
+        
+    if distribution=='uniform':
+        return np.random.uniform(parameters[0],parameters[1],samples).tolist()
+    elif distribution=='binomial':
+        return np.random.binomial(parameters[0],parameters[1],samples).tolist()
+    elif distribution=='normal':
+        return np.random.normal(parameters[0],parameters[1],samples).tolist()
+    elif distribution=='poisson':
+        return np.random.poisson(parameters[0],parameters[1]).tolist()
+    elif distribution=='linear':
+        return np.linspace(parameters[0],parameters[1],samples).tolist()
+
+def add_ppfilter(rscript, exp_root_path):
+    global base_filter_path
+    if(rscript):
+        scripts_dir =  os.path.join(exp_root_path, 'Scripts')
+        rscriptfn = os.path.join(base_filter_path, rscript)
+        if os.path.isfile(rscriptfn):
+            shutil.copy(rscriptfn, os.path.join(scripts_dir, 'PostProcessFilter.R'))
+            jsonfn = os.path.splitext(rscriptfn)[0] + '.json'
+            if os.path.isfile(jsonfn):
+                with open(jsonfn) as json_file:
+                    ppopts = json.load(json_file)
+                    if ppopts['Consolidate_Compatible']:
+                        shutil.move(os.path.join(exp_root_path, ppopts['Consolidate_Script']), os.path.join(exp_root_path, 'Results'))
+        filterParamsDir = os.path.join(exp_root_path, 'base_folder', 'FilterParams') 
+        if(os.path.exists(filterParamsDir)):
+            shutil.copy(os.path.join(filterParamsDir, 'FilterParams.json'), scripts_dir)
+
+def execute_graple(topdir, SimsPerJob = def_SimsPerJob, force_gen = False):
+    uid = os.path.basename(topdir)
+    dbdoc = collection.find_one({'key':uid})
+    if dbdoc['status'] == 1: # dont submit if aborted
+        if SimsPerJob == def_SimsPerJob and (not force_gen):
+            submit_response_string=subprocess.check_output(['python', os.path.join(topdir, 'SubmitGrapleBatch.py')])
+        else:
+            submit_response_string=subprocess.check_output(['python', os.path.join(topdir, 'SubmitGrapleBatch.py'), str(SimsPerJob)])
+
+        submitIDList=[]
+        for i in submit_response_string.split('\n'):
+            if 'cluster' in i:
+                submitIDList.append(i.split(' ')[5].split('.')[0])
+        update_doc = {'payload':submitIDList, 'status':2}
+        collection.update_one({'key':uid}, {'$set':update_doc})
 
 def handle_batch_job(task, rscript):
     global base_graple_path, base_filter_path
@@ -94,175 +139,7 @@ def handle_batch_job(task, rscript):
             shutil.copy(os.path.join(filterParamsDir, 'FilterParams.json'), os.path.join(topdir,'Scripts'))
             shutil.rmtree(filterParamsDir)
     execute_graple(topdir)
-    
-def execute_graple(topdir, SimsPerJob = def_SimsPerJob, force_gen = False):
-    uid = os.path.basename(topdir)
-    dbdoc = collection.find_one({'key':uid})
-    if dbdoc['status'] == 1: # dont submit if aborted
-        if SimsPerJob == def_SimsPerJob and (not force_gen):
-            submit_response_string=subprocess.check_output(['python', os.path.join(topdir, 'SubmitGrapleBatch.py')])
-        else:
-            submit_response_string=subprocess.check_output(['python', os.path.join(topdir, 'SubmitGrapleBatch.py'), str(SimsPerJob)])
 
-        submitIDList=[]
-        for i in submit_response_string.split('\n'):
-            if 'cluster' in i:
-                submitIDList.append(i.split(' ')[5].split('.')[0])
-        update_doc = {'payload':submitIDList, 'status':2}
-        collection.update_one({'key':uid}, {'$set':update_doc})
-
-def process_graple_results(uid):
-    global base_upload_path, base_result_path
-    res_dir = os.path.join(base_result_path, uid) # can change uid to random folder name for security
-    tarfn = os.path.join(res_dir, 'output.tar.gz')
-    if not os.path.isfile(tarfn):
-        os.mkdir(res_dir)
-        #subprocess.call(['tar', 'czf', tarfn, '-C', os.path.dirname(tarfn)])
-        with tarfile.open(tarfn, 'w:gz', compresslevel=9) as tar:
-            for f in listdir(os.path.join(base_upload_path, uid, 'Results')):
-                if f.endswith('.tar.bz2') or f == 'sim_summary.csv':
-                    tar.add(os.path.join(base_upload_path, uid, 'Results', f), f)
-                    #os.remove(f) 
-    return os.path.join(uid, 'output.tar.gz')
-    
-def check_Job_status(uid):
-    response = {'errors':''}
-    query = {'key':uid}
-    dbdoc = collection.find_one(query)
-    if dbdoc == None:
-        response['errors'] += 'JobID ' + uid + ' not found in database'
-
-    if len(response['errors']) > 0:
-        return response
-
-    response['curr_status'] = str(dbdoc['progress']) + '% complete'
-    return response
-
-def Abort_Job(uid):
-    response = {'errors':''}
-    query = {'key':uid}
-    submitIDList = collection.find_one(query)
-    if submitIDList == None:
-        response['errors'] += 'JobID ' + uid + ' not found in database'
-    else:
-        update_doc = {'status':5}
-        collection.update_one({'key':uid}, {'$set':update_doc})
-        response['curr_status'] = 'All jobs marked for removal'
-
-    return response
-        
-def ret_distribution_samples(distribution,samples,parameters):
-    parameters = map(float,parameters)
-        
-    if distribution=='uniform':
-        return np.random.uniform(parameters[0],parameters[1],samples).tolist()
-    elif distribution=='binomial':
-        return np.random.binomial(parameters[0],parameters[1],samples).tolist()
-    elif distribution=='normal':
-        return np.random.normal(parameters[0],parameters[1],samples).tolist()
-    elif distribution=='poisson':
-        return np.random.poisson(parameters[0],parameters[1]).tolist()
-    elif distribution=='linear':
-        return np.linspace(parameters[0],parameters[1],samples).tolist()
-
-def generate_sweep_job(task, rscript):
-    global base_filter_path, base_graple_path
-    exp_root_path = task[1]
-    filename = task[2]
-    sims_per_job = int(task[3])
-    copy_tree(base_graple_path, exp_root_path)
-    subprocess.call(['python', os.path.join(exp_root_path, 'CreateWorkingFolders.py')])
-    base_folder = os.path.join(exp_root_path, 'base_folder')
-    subprocess.call(['tar','xfz', os.path.join(base_folder, filename), '-C', base_folder])
-    os.remove(os.path.join(base_folder, filename))
-    with open(os.path.join(base_folder, 'job_desc.json')) as data_file:
-        jsondata = json.load(data_file)
-
-    if(rscript):
-        scripts_dir =  os.path.join(exp_root_path, 'Scripts')
-        rscriptfn = os.path.join(base_filter_path, rscript)
-        if os.path.isfile(rscriptfn):
-            shutil.copy(rscriptfn, os.path.join(scripts_dir, 'PostProcessFilter.R'))
-            with open(rscriptfn) as ppfilter_file:
-                if 'CONSOLIDATE_COMPATIBLE' in ppfilter_file.read(1000):
-                    shutil.move(os.path.join(exp_root_path, 'ConsolidateResults.py'), os.path.join(exp_root_path, 'Results'))
-        filterParamsDir = os.path.join(base_folder, 'FilterParams') 
-        if(os.path.exists(filterParamsDir)):
-            shutil.copy(os.path.join(filterParamsDir, 'FilterParams.json'), scripts_dir)
-
-    summary = []
-    columns = {}
-    noOfFiles = len(jsondata['ExpFiles'])
-    base_iterations = 1
-    for i in range(0, noOfFiles):
-        base_file = jsondata['ExpFiles'][i]['driverfile']
-        variables = jsondata['ExpFiles'][i]['variables'][0]
-        columns[base_file] = {}
-        for key, value in variables.iteritems():
-            variable = key
-            var_distribution = ''
-            var_start_value = 0
-            var_end_value = 0
-            var_operation = ''
-            var_steps = 0
-            if('distribution' in value):
-                var_distribution = value['distribution']
-            if('operation' in value):
-                var_operation = value['operation']
-            if('start' in value):
-                var_start_value = value['start']
-            if('end' in value):
-                var_end_value = value['end']
-            if('steps' in value):
-                var_steps = value['steps']
-                var_steps += 1 
-                base_iterations *= var_steps
-            columns[base_file][variable]=[ret_distribution_samples(var_distribution,var_steps,[var_start_value, var_end_value])]
-            columns[base_file][variable].append(var_operation)
-            columns[base_file][variable].append(var_distribution)
-            columns[base_file][variable].append(var_steps)
-    Sims_dir=os.path.join(exp_root_path, 'Sims')
-    varcomb = []
-    numcomb = []
-    sim_no = 1
-    for jsonfilename, variables in columns.iteritems():
-        for variable, stepValues in variables.iteritems():
-            varcomb.append(jsonfilename +',' + variable + ',' + stepValues[2] + ',' + stepValues[1])
-            numcomb.append(stepValues[0])
-
-    iterprod = list(itertools.product(*numcomb))
-        
-    for cc in range(0, len(iterprod), sims_per_job):
-        new_dir=os.path.join(Sims_dir, 'Sim' + str(sim_no))
-        shutil.copytree(base_folder, new_dir)
-        to_pack = [varcomb, iterprod[cc:cc+sims_per_job]]
-        with open(os.path.join(new_dir, 'generate.json'), 'w') as pickf:
-            json.dump(to_pack, pickf)
-        for c in range(len(to_pack[1])):
-            row = ['Sim' + str(sim_no) + '_' + str(c+1)]
-            for i in range(len(varcomb)):
-                var_list = varcomb[i].split(',')
-                base_file = var_list[0]
-                field = var_list[1]
-                operation = var_list[3]
-                row.append(field)
-                row.append(columns[base_file][field][2]) 
-                row.append(columns[base_file][field][1]) 
-                row.append(str(to_pack[1][c][i]))
-            summary.append(row)
-        sim_no += 1
-    # write summary of modifications to a file.
-    result_summary = open(os.path.join(exp_root_path, 'Results', 'sim_summary.csv'),'wb')
-    wr = csv.writer(result_summary,dialect='excel')
-    for row in summary:
-        wr.writerow(row)
-    result_summary.close()
-
-    # execute graple job
-    execute_graple(exp_root_path, 1, True) # for a generate job, the bundled sims per job is 1, worker expands the single job into many as per sims_per_job
-    return
-        
-# handles sweep string cases.    
 def handle_sweep_job(task, rscript):
     global base_filter_path, base_graple_path
     exp_root_path = task[1]
@@ -275,17 +152,7 @@ def handle_sweep_job(task, rscript):
     with open(os.path.join(base_folder, 'job_desc.json')) as data_file:
         jsondata = json.load(data_file)
 
-    if(rscript):
-        scripts_dir =  os.path.join(exp_root_path, 'Scripts')
-        rscriptfn = os.path.join(base_filter_path, rscript)
-        if os.path.isfile(rscriptfn):
-            shutil.copy(rscriptfn, os.path.join(scripts_dir, 'PostProcessFilter.R'))
-            with open(rscriptfn) as ppfilter_file:
-                if 'CONSOLIDATE_COMPATIBLE' in ppfilter_file.read(1000):
-                    shutil.move(os.path.join(exp_root_path, 'ConsolidateResults.py'), os.path.join(exp_root_path, 'Results'))
-        filterParamsDir = os.path.join(base_folder, 'FilterParams') 
-        if(os.path.exists(filterParamsDir)):
-            shutil.copy(os.path.join(filterParamsDir, 'FilterParams.json'), scripts_dir)
+    add_ppfilter(rscript, exp_root_path)
 
     summary = []
     columns = {}
@@ -370,98 +237,6 @@ def handle_sweep_job(task, rscript):
     execute_graple(exp_root_path)
     return
 
-def generate_special_job(task, rscript):
-    global base_filter_path, base_graple_path
-    exp_root_path = task[1]
-    filename = task[2]
-    sims_per_job = int(task[3])
-    copy_tree(base_graple_path, exp_root_path)
-    subprocess.call(['python', os.path.join(exp_root_path, 'CreateWorkingFolders.py')])
-    base_folder = os.path.join(exp_root_path, 'base_folder')
-    subprocess.call(['tar','xfz', os.path.join(base_folder, filename), '-C', base_folder])
-    with open(os.path.join(base_folder, 'job_desc.json')) as data_file:    
-        jsondata = json.load(data_file)
-
-    if(rscript):
-        scripts_dir =  os.path.join(exp_root_path, 'Scripts')
-        rscriptfn = os.path.join(base_filter_path, rscript)
-        if os.path.isfile(rscriptfn):
-            shutil.copy(rscriptfn, os.path.join(scripts_dir, 'PostProcessFilter.R'))
-            with open(rscriptfn) as ppfilter_file:
-                if 'CONSOLIDATE_COMPATIBLE' in ppfilter_file.read(1000):
-                    shutil.move(os.path.join(exp_root_path, 'ConsolidateResults.py'), os.path.join(exp_root_path, 'Results'))
-        filterParamsDir = os.path.join(base_folder, 'FilterParams') 
-        if(os.path.exists(filterParamsDir)):
-            shutil.copy(os.path.join(filterParamsDir, 'FilterParams.json'), scripts_dir)
-
-    summary = []
-    columns = {}
-    noOfFiles = len(jsondata['ExpFiles']) 
-    base_iterations = jsondata['num_iterations']
-    for i in range(0, noOfFiles):
-        base_file = jsondata['ExpFiles'][i]['driverfile']
-        variables = jsondata['ExpFiles'][i]['variables'][0]
-        columns[base_file] = {}
-        for key, value in variables.iteritems():
-            variable = key
-            var_distribution = ''
-            var_start_value = 0
-            var_end_value = 0
-            var_operation = ''
-            if('distribution' in value):
-                var_distribution = value['distribution']
-            if('operation' in value):
-                var_operation = value['operation']                  
-            if('start' in value):
-                var_start_value = value['start']
-            if('end' in value):
-                var_end_value = value['end']    
-            columns[base_file][variable]=[ret_distribution_samples(var_distribution,base_iterations,[var_start_value, var_end_value])]
-            columns[base_file][variable].append(var_operation)
-            columns[base_file][variable].append(var_distribution)
-
-    Sims_dir=os.path.join(exp_root_path, 'Sims')
-    varcomb = []
-    numcomb = []
-    sim_no = 1
-    for jsonfilename, variables in columns.iteritems():
-        for variable, stepValues in variables.iteritems():
-            varcomb.append(jsonfilename + ',' + variable + ',' + stepValues[2] + ',' + stepValues[1])
-            numcomb.append(stepValues[0])
-
-    iterprod = list(zip(*numcomb))
-
-    for cc in range(0, len(iterprod), sims_per_job):
-        new_dir = os.path.join(Sims_dir, 'Sim' + str(sim_no))
-        shutil.copytree(base_folder, new_dir)
-        to_pack = [varcomb, iterprod[cc:cc+sims_per_job]]
-        with open(os.path.join(new_dir, 'generate.json'), 'w') as pickf:
-            json.dump(to_pack, pickf)
-        for c in range(len(to_pack[1])):
-            row = ['Sim' + str(sim_no) + '_' + str(c+1)]
-            for i in range(len(varcomb)):
-                var_list = varcomb[i].split(',')
-                base_file = var_list[0]
-                field = var_list[1]
-                operation = var_list[3]
-                row.append(field)
-                row.append(columns[base_file][field][2]) 
-                row.append(columns[base_file][field][1]) 
-                row.append(str(to_pack[1][c][i]))
-            summary.append(row)
-        sim_no += 1
-    # write summary of modifications to a file.
-    result_summary = open(os.path.join(exp_root_path, 'Results', 'sim_summary.csv'),'wb')
-    wr = csv.writer(result_summary,dialect='excel')
-    for row in summary:
-        wr.writerow(row)
-    result_summary.close()
-
-    # execute graple job
-    execute_graple(exp_root_path, 1, True)
-    return
-
-# handles the core of distribution sweep jobs.
 def handle_special_job(task, rscript):
     global base_filter_path, base_graple_path
     exp_root_path = task[1]
@@ -473,17 +248,7 @@ def handle_special_job(task, rscript):
     with open(os.path.join(base_folder, 'job_desc.json')) as data_file:    
         jsondata = json.load(data_file)
 
-    if(rscript):
-        scripts_dir =  os.path.join(exp_root_path, 'Scripts')
-        rscriptfn = os.path.join(base_filter_path, rscript)
-        if os.path.isfile(rscriptfn):
-            shutil.copy(rscriptfn, os.path.join(scripts_dir, 'PostProcessFilter.R'))
-            with open(rscriptfn) as ppfilter_file:
-                if 'CONSOLIDATE_COMPATIBLE' in ppfilter_file.read(1000):
-                    shutil.move(os.path.join(exp_root_path, 'ConsolidateResults.py'), os.path.join(exp_root_path, 'Results'))
-        filterParamsDir = os.path.join(base_folder, 'FilterParams') 
-        if(os.path.exists(filterParamsDir)):
-            shutil.copy(os.path.join(filterParamsDir, 'FilterParams.json'), scripts_dir)
+    add_ppfilter(rscript, exp_root_path)
 
     summary = []
     columns = {}
@@ -553,26 +318,195 @@ def handle_special_job(task, rscript):
     # execute graple job
     execute_graple(exp_root_path)
     return
+
+def generate_sweep_job(task, rscript):
+    global base_filter_path, base_graple_path
+    exp_root_path = task[1]
+    filename = task[2]
+    sims_per_job = int(task[3])
+    copy_tree(base_graple_path, exp_root_path)
+    subprocess.call(['python', os.path.join(exp_root_path, 'CreateWorkingFolders.py')])
+    base_folder = os.path.join(exp_root_path, 'base_folder')
+    subprocess.call(['tar','xfz', os.path.join(base_folder, filename), '-C', base_folder])
+    os.remove(os.path.join(base_folder, filename))
+    with open(os.path.join(base_folder, 'job_desc.json')) as data_file:
+        jsondata = json.load(data_file)
+
+    add_ppfilter(rscript, exp_root_path)
+
+    summary = []
+    columns = {}
+    noOfFiles = len(jsondata['ExpFiles'])
+    base_iterations = 1
+    for i in range(0, noOfFiles):
+        base_file = jsondata['ExpFiles'][i]['driverfile']
+        variables = jsondata['ExpFiles'][i]['variables'][0]
+        columns[base_file] = {}
+        for key, value in variables.iteritems():
+            variable = key
+            var_distribution = ''
+            var_start_value = 0
+            var_end_value = 0
+            var_operation = ''
+            var_steps = 0
+            if('distribution' in value):
+                var_distribution = value['distribution']
+            if('operation' in value):
+                var_operation = value['operation']
+            if('start' in value):
+                var_start_value = value['start']
+            if('end' in value):
+                var_end_value = value['end']
+            if('steps' in value):
+                var_steps = value['steps']
+                var_steps += 1 
+                base_iterations *= var_steps
+            columns[base_file][variable]=[ret_distribution_samples(var_distribution,var_steps,[var_start_value, var_end_value])]
+            columns[base_file][variable].append(var_operation)
+            columns[base_file][variable].append(var_distribution)
+            columns[base_file][variable].append(var_steps)
+    Sims_dir=os.path.join(exp_root_path, 'Sims')
+    varcomb = []
+    numcomb = []
+    sim_no = 1
+    for jsonfilename, variables in columns.iteritems():
+        for variable, stepValues in variables.iteritems():
+            varcomb.append(jsonfilename +',' + variable + ',' + stepValues[2] + ',' + stepValues[1])
+            numcomb.append(stepValues[0])
+
+    iterprod = list(itertools.product(*numcomb))
         
-@app.route('/GrapleRunMetSample', methods= ['POST'])
-def special_batch():
+    for cc in range(0, len(iterprod), sims_per_job):
+        new_dir=os.path.join(Sims_dir, 'Sim' + str(sim_no))
+        shutil.copytree(base_folder, new_dir)
+        to_pack = [varcomb, iterprod[cc:cc+sims_per_job]]
+        with open(os.path.join(new_dir, 'generate.json'), 'w') as pickf:
+            json.dump(to_pack, pickf)
+        for c in range(len(to_pack[1])):
+            row = ['Sim' + str(sim_no) + '_' + str(c+1)]
+            for i in range(len(varcomb)):
+                var_list = varcomb[i].split(',')
+                base_file = var_list[0]
+                field = var_list[1]
+                operation = var_list[3]
+                row.append(field)
+                row.append(columns[base_file][field][2]) 
+                row.append(columns[base_file][field][1]) 
+                row.append(str(to_pack[1][c][i]))
+            summary.append(row)
+        sim_no += 1
+    # write summary of modifications to a file.
+    result_summary = open(os.path.join(exp_root_path, 'Results', 'sim_summary.csv'),'wb')
+    wr = csv.writer(result_summary,dialect='excel')
+    for row in summary:
+        wr.writerow(row)
+    result_summary.close()
+
+    # execute graple job
+    execute_graple(exp_root_path, 1, True) # for a generate job, the bundled sims per job is 1, worker expands the single job into many as per sims_per_job
+    return
+        
+def generate_special_job(task, rscript):
+    global base_filter_path, base_graple_path
+    exp_root_path = task[1]
+    filename = task[2]
+    sims_per_job = int(task[3])
+    copy_tree(base_graple_path, exp_root_path)
+    subprocess.call(['python', os.path.join(exp_root_path, 'CreateWorkingFolders.py')])
+    base_folder = os.path.join(exp_root_path, 'base_folder')
+    subprocess.call(['tar','xfz', os.path.join(base_folder, filename), '-C', base_folder])
+    with open(os.path.join(base_folder, 'job_desc.json')) as data_file:    
+        jsondata = json.load(data_file)
+
+    add_ppfilter(rscript, exp_root_path)
+
+    summary = []
+    columns = {}
+    noOfFiles = len(jsondata['ExpFiles']) 
+    base_iterations = jsondata['num_iterations']
+    for i in range(0, noOfFiles):
+        base_file = jsondata['ExpFiles'][i]['driverfile']
+        variables = jsondata['ExpFiles'][i]['variables'][0]
+        columns[base_file] = {}
+        for key, value in variables.iteritems():
+            variable = key
+            var_distribution = ''
+            var_start_value = 0
+            var_end_value = 0
+            var_operation = ''
+            if('distribution' in value):
+                var_distribution = value['distribution']
+            if('operation' in value):
+                var_operation = value['operation']                  
+            if('start' in value):
+                var_start_value = value['start']
+            if('end' in value):
+                var_end_value = value['end']    
+            columns[base_file][variable]=[ret_distribution_samples(var_distribution,base_iterations,[var_start_value, var_end_value])]
+            columns[base_file][variable].append(var_operation)
+            columns[base_file][variable].append(var_distribution)
+
+    Sims_dir=os.path.join(exp_root_path, 'Sims')
+    varcomb = []
+    numcomb = []
+    sim_no = 1
+    for jsonfilename, variables in columns.iteritems():
+        for variable, stepValues in variables.iteritems():
+            varcomb.append(jsonfilename + ',' + variable + ',' + stepValues[2] + ',' + stepValues[1])
+            numcomb.append(stepValues[0])
+
+    iterprod = list(zip(*numcomb))
+
+    for cc in range(0, len(iterprod), sims_per_job):
+        new_dir = os.path.join(Sims_dir, 'Sim' + str(sim_no))
+        shutil.copytree(base_folder, new_dir)
+        to_pack = [varcomb, iterprod[cc:cc+sims_per_job]]
+        with open(os.path.join(new_dir, 'generate.json'), 'w') as pickf:
+            json.dump(to_pack, pickf)
+        for c in range(len(to_pack[1])):
+            row = ['Sim' + str(sim_no) + '_' + str(c+1)]
+            for i in range(len(varcomb)):
+                var_list = varcomb[i].split(',')
+                base_file = var_list[0]
+                field = var_list[1]
+                operation = var_list[3]
+                row.append(field)
+                row.append(columns[base_file][field][2]) 
+                row.append(columns[base_file][field][1]) 
+                row.append(str(to_pack[1][c][i]))
+            summary.append(row)
+        sim_no += 1
+    # write summary of modifications to a file.
+    result_summary = open(os.path.join(exp_root_path, 'Results', 'sim_summary.csv'),'wb')
+    wr = csv.writer(result_summary,dialect='excel')
+    for row in summary:
+        wr.writerow(row)
+    result_summary.close()
+
+    # execute graple job
+    execute_graple(exp_root_path, 1, True)
+    return
+
+@app.route('/GrapleRun', methods= ['POST'])
+def upload_file():
     global base_upload_path, base_filter_path
-    response = {'errors' : ''}
+    response = {'errors' : '', 'warnings': ''}
     if not 'files' in request.files:
         response['errors'] += 'Did not receive experiment files \n'
+    if 'apikey' in request.form:
+        apikey = request.form['apikey']
+        if apikey == '0':
+            response['warnings'] += 'No API key provided \n'
+        if apicoll.find_one({'key' : apikey}) == None:
+            response['errors'] += 'Invalid API key \n'
+    else:
+        response['errors'] += 'No API key provided \n'
     if 'filter' in request.form:
         filtername = request.form['filter'] + '.R'
         if not os.path.isdir(base_filter_path) or not filtername in os.listdir(base_filter_path):
             response['errors'] += 'Invalid Filter name \n'
     else:
         filtername = None
-    if 'gen_per_job' in request.form:
-        if not request.form['gen_per_job'].isdigit():
-            response['errors'] += 'gen_per_job not an integer \n'
-        else:
-            gen_per_job = int(request.form['gen_per_job'])
-    else:
-        gen_per_job = None
     if 'retention' in request.form:
         if not request.form['retention'].isdigit():
             response['error'] += 'retention is not an integer \n'
@@ -584,11 +518,15 @@ def special_batch():
         expname = str(request.form['expname'])[:50]
     else:
         expname = ''
+    email = ''
     if 'email' in request.form:
-        email = str(request.form['email'])[:50]
-    else:
-        email = ''
-    if len(response['errors']) > 0: 
+        if len(request.form['email']) != 0:
+            email = str(request.form['email'])[:50]
+        elif 'apikey' in request.form:
+            found = apicoll.find_one({'key' : apikey})
+            if found != None and 'email' in found:
+                email = found['email']
+    if len(response['errors']) > 0:
         return jsonify(response)
 
     f = request.files['files']
@@ -596,24 +534,26 @@ def special_batch():
     response['uid'] = batch_id_generator()
     exp_root_path = os.path.join(base_upload_path, response['uid'])
     os.mkdir(exp_root_path)
-    base_folder = os.path.join(exp_root_path, 'base_folder')
-    os.mkdir(base_folder)
-    f.save(os.path.join(base_folder, filename))
-    if(gen_per_job):
-        task_desc = ['generate_special_job', exp_root_path, filename, str(gen_per_job)]
-    else:
-        task_desc = ['handle_special_job', exp_root_path, filename]
-    collection.insert_one({'key':response['uid'], 'submitted':datetime.datetime.now(), 'status':1, 'progress':0.0, 'retention':retention, 'expname':expname, 'email':email})
+    f.save(os.path.join(exp_root_path, filename))
+    task_desc = ['handle_batch_job', exp_root_path, filename]
+    collection.insert_one({'key':response['uid'], 'submitted':datetime.datetime.now(), 'status':1, 'progress':0.0, 'retention':retention, 'expname':expname, 'email':email, 'apikey':apikey})
     doTask.delay(task_desc, filtername)
-    response['status'] = 'Job submitted to task queue'
     return jsonify(response)
 
 @app.route('/GrapleRunLinearSweep', methods= ['POST'])
 def linear_sweep():
     global base_upload_path, base_filter_path
-    response = {'errors' : ''}
+    response = {'errors' : '', 'warnings': ''}
     if not 'files' in request.files:
         response['errors'] += 'Did not receive experiment files \n'
+    if 'apikey' in request.form:
+        apikey = request.form['apikey']
+        if apikey == '0':
+            response['warnings'] += 'No API key provided \n'
+        if apicoll.find_one({'key' : apikey}) == None:
+            response['errors'] += 'Invalid API key \n'
+    else:
+        response['errors'] += 'No API key provided \n'
     if 'filter' in request.form:
         filtername = request.form['filter'] + '.R'
         if not os.path.isdir(base_filter_path) or not filtername in os.listdir(base_filter_path):
@@ -638,10 +578,14 @@ def linear_sweep():
         expname = str(request.form['expname'])[:50]
     else:
         expname = ''
+    email = ''
     if 'email' in request.form:
-        email = str(request.form['email'])[:50]
-    else:
-        email = ''
+        if len(request.form['email']) != 0:
+            email = str(request.form['email'])[:50]
+        elif 'apikey' in request.form:
+            found = apicoll.find_one({'key' : apikey})
+            if found != None and 'email' in found:
+                email = found['email']
     if len(response['errors']) > 0:
         return jsonify(response)
 
@@ -657,33 +601,38 @@ def linear_sweep():
         task_desc = ['generate_sweep_job', exp_root_path, filename, str(gen_per_job)]
     else:
         task_desc = ['handle_sweep_job', exp_root_path, filename]
-    collection.insert_one({'key':response['uid'], 'submitted':datetime.datetime.now(), 'status':1, 'progress':0.0, 'retention':retention, 'expname':expname, 'email':email})
+    collection.insert_one({'key':response['uid'], 'submitted':datetime.datetime.now(), 'status':1, 'progress':0.0, 'retention':retention, 'expname':expname, 'email':email, 'apikey':apikey})
     doTask.delay(task_desc, filtername)
     response['status'] = 'Job submitted to task queue'
     return jsonify(response)
 
-@app.route('/GrapleRunStatus/<uid>', methods=['GET'])
-def check_status(uid):
-    status = check_Job_status(uid)
-    return jsonify(status)
-    
-@app.route('/GrapleEnd/<uid>', methods=['GET'])
-def abort_job(uid):
-    status = Abort_Job(uid)
-    return jsonify(status)
-
-@app.route('/GrapleRun', methods= ['POST'])
-def upload_file():
+@app.route('/GrapleRunMetSample', methods= ['POST'])
+def special_batch():
     global base_upload_path, base_filter_path
-    response = {'errors' : ''}
+    response = {'errors' : '', 'warnings': ''}
     if not 'files' in request.files:
         response['errors'] += 'Did not receive experiment files \n'
+    if 'apikey' in request.form:
+        apikey = request.form['apikey']
+        if apikey == '0':
+            response['warnings'] += 'No API key provided \n'
+        if apicoll.find_one({'key' : apikey}) == None:
+            response['errors'] += 'Invalid API key \n'
+    else:
+        response['errors'] += 'No API key provided \n'
     if 'filter' in request.form:
         filtername = request.form['filter'] + '.R'
         if not os.path.isdir(base_filter_path) or not filtername in os.listdir(base_filter_path):
             response['errors'] += 'Invalid Filter name \n'
     else:
         filtername = None
+    if 'gen_per_job' in request.form:
+        if not request.form['gen_per_job'].isdigit():
+            response['errors'] += 'gen_per_job not an integer \n'
+        else:
+            gen_per_job = int(request.form['gen_per_job'])
+    else:
+        gen_per_job = None
     if 'retention' in request.form:
         if not request.form['retention'].isdigit():
             response['error'] += 'retention is not an integer \n'
@@ -695,11 +644,15 @@ def upload_file():
         expname = str(request.form['expname'])[:50]
     else:
         expname = ''
+    email = ''
     if 'email' in request.form:
-        email = str(request.form['email'])[:50]
-    else:
-        email = ''
-    if len(response['errors']) > 0:
+        if len(request.form['email']) != 0:
+            email = str(request.form['email'])[:50]
+        elif 'apikey' in request.form:
+            found = apicoll.find_one({'key' : apikey})
+            if found != None and 'email' in found:
+                email = found['email']
+    if len(response['errors']) > 0: 
         return jsonify(response)
 
     f = request.files['files']
@@ -707,17 +660,74 @@ def upload_file():
     response['uid'] = batch_id_generator()
     exp_root_path = os.path.join(base_upload_path, response['uid'])
     os.mkdir(exp_root_path)
-    f.save(os.path.join(exp_root_path, filename))
-    task_desc = ['handle_batch_job', exp_root_path, filename]
-    collection.insert_one({'key':response['uid'], 'submitted':datetime.datetime.now(), 'status':1, 'progress':0.0, 'retention':retention, 'expname':expname, 'email':email})
+    base_folder = os.path.join(exp_root_path, 'base_folder')
+    os.mkdir(base_folder)
+    f.save(os.path.join(base_folder, filename))
+    if(gen_per_job):
+        task_desc = ['generate_special_job', exp_root_path, filename, str(gen_per_job)]
+    else:
+        task_desc = ['handle_special_job', exp_root_path, filename]
+    collection.insert_one({'key':response['uid'], 'submitted':datetime.datetime.now(), 'status':1, 'progress':0.0, 'retention':retention, 'expname':expname, 'email':email, 'apikey':apikey})
     doTask.delay(task_desc, filtername)
+    response['status'] = 'Job submitted to task queue'
+    return jsonify(response)
+
+@app.route('/GrapleRunStatus/<uid>', methods=['GET'])
+def check_status(uid):
+    response = {'errors':'', 'warnings':''}
+    if 'apikey' in request.args:
+        apikey = request.args['apikey']
+        if apikey == '0':
+            response['warnings'] += 'No API key provided \n'
+    else:
+        response['errors'] += 'No API key provided \n'
+    if len(response['errors']) > 0:
+        return jsonify(response)
+    query = {'key':uid, 'apikey':apikey}
+    dbdoc = collection.find_one(query)
+    if dbdoc == None:
+        response['errors'] += 'JobID ' + uid + ' not found in database'
+    if len(response['errors']) > 0:
+        return jsonify(response)
+
+    response['curr_status'] = str(dbdoc['progress']) + '% complete'
+    return jsonify(response)
+    
+@app.route('/GrapleEnd/<uid>', methods=['GET'])
+def abort_job(uid):
+    response = {'errors':'', 'warnings':''}
+    if 'apikey' in request.args:
+        apikey = request.args['apikey']
+        if apikey == '0':
+            response['warnings'] += 'No API key provided \n'
+    else:
+        response['errors'] += 'No API key provided \n'
+    query = {'key':uid, 'apikey':apikey}
+    dbdoc = collection.find_one(query)
+    if dbdoc == None:
+        response['errors'] += 'JobID ' + uid + ' not found in database'
+    elif dbdoc['status'] == 5:
+        response['errors'] += 'Job already marked for removal'
+    else:
+        update_doc = {'status':5}
+        collection.update_one({'key':uid}, {'$set':update_doc})
+        response['curr_status'] = 'All jobs marked for removal'
     return jsonify(response)
 
 @app.route('/GrapleRunResults/<uid>', methods=['GET'])
 def return_consolidated_output(uid, plain = False):
     global base_upload_path
-    response = {'errors':''}
-    query = {'key':uid}
+    response = {'errors':'', 'warnings':''}
+    if not plain:
+        if 'apikey' in request.args:
+            apikey = request.args['apikey']
+            if apikey == '0':
+                response['warnings'] += 'No API key provided \n'
+        else:
+            response['errors'] += 'No API key provided \n'
+        query = {'key':uid, 'apikey':apikey}
+    else:
+        query = {'key':uid}
     dbdoc = collection.find_one(query)
     if dbdoc == None:
         response['errors'] = 'JobID ' + uid + ' not found in database'
@@ -746,29 +756,6 @@ def download_results(uid):
     else:
         return jsonify(response)
 
-@app.route('/download_file/<request_string>', methods=['GET','POST'])
-def return_requested_file(request_string):
-    global base_upload_path
-    parameters=request_string.split('*')
-    uid = parameters[0]
-    sim_no = parameters[1]
-    file_name = parameters[2]
-    ret_dict = {}
-    if request.method == 'GET':
-        dir_name = os.path.join(base_upload_path,uid)
-        output_file =  os.path.join(uid,'Results','Sims','Sim'+sim_no,'Results',file_name)
-        if (os.path.exists(os.path.join(base_upload_path,output_file))):
-            url = url_for('static',filename=output_file)
-            ret_dict['output_url']=url
-        else:
-            process_graple_results(dir_name)
-            if (os.path.exists(os.path.join(base_upload_path,output_file))):
-                url = url_for('static',filename=output_file)
-                ret_dict['output_url']=url
-            else:
-                ret_dict['output_url']='file not found,please check input args.'
-        return jsonify(ret_dict)
-        
 @app.route('/service_status', methods=['GET'])
 def return_service_status():
     service_status = {}
@@ -798,6 +785,5 @@ def index_redirect():
     return redirect('http://www.graple.org', code = 302)
 
 if __name__ == '__main__':
-    app.debug = True
+    app.debug = gwsconf['debug']
     app.run(host='0.0.0.0')
-
