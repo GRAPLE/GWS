@@ -94,6 +94,7 @@ def process_graple_results(uid, retention):
     global base_upload_path, base_result_path
     res_dir = os.path.join(base_result_path, uid) # can change uid to random folder name for security
     tarfn = os.path.join(res_dir, 'output.tar.gz')
+    kfpath = os.path.join(base_upload_path, uid, '.keep_files')
     if not os.path.isfile(tarfn):
         os.mkdir(res_dir)
         exp_res_dir = os.path.join(base_upload_path, uid, 'Results')
@@ -103,12 +104,15 @@ def process_graple_results(uid, retention):
         cons_script = os.path.join(exp_res_dir, 'ConsolidateResults.py')
         if os.path.isfile(cons_script):
             subprocess.call(['python', cons_script])
+        if os.path.isfile(kfpath):
+            shutil.copytree(os.path.join(base_upload_path, uid, 'Logs'), os.path.join(exp_res_dir, 'Logs'))
+            shutil.copy(os.path.join(base_upload_path, uid, 'graple.log'), os.path.join(exp_res_dir, 'Logs'))
         subprocess.call(['tar', 'I', 'pigz', '-cf', tarfn] + listdir(exp_res_dir), cwd = exp_res_dir)
-        #with tarfile.open(tarfn, 'w:gz', compresslevel=9) as tar:
-        #    for f in listdir(os.path.join(base_upload_path, uid, 'Results')):
-        #        if f == 'Sims' or f == 'sim_summary.csv':
-        #            tar.add(os.path.join(exp_res_dir, f), f)
-    shutil.rmtree(os.path.join(base_upload_path, uid))
+    if os.path.isfile(kfpath):
+        with open(kfpath, 'a') as kffd:
+            kffd.write(" processed results")
+    else:
+        shutil.rmtree(os.path.join(base_upload_path, uid))
     comp_time = datetime.datetime.now()
     update_doc = {'status':3, 'progress':100.0, 'completed':comp_time}
     if retention != 0:
@@ -158,8 +162,6 @@ def process_once():
         collection.update_one({'key':dbdoc['key']}, {'$set':{'status':6}})
 
     for dbdoc in collection.find({'expiry':{'$lt':datetime.datetime.now()}, 'status':{'$ne':6}}):
-        if os.path.isdir(os.path.join(base_upload_path, dbdoc['key'])):
-            shutil.rmtree(os.path.join(base_upload_path, dbdoc['key']))
         if os.path.isdir(os.path.join(base_result_path, dbdoc['key'])):
             shutil.rmtree(os.path.join(base_result_path, dbdoc['key']))
         collection.update_one({'key':dbdoc['key']}, {'$set':{'status':6}})

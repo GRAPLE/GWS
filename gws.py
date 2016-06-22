@@ -129,6 +129,8 @@ def handle_batch_job(task, rscript):
     inputfile = os.path.join(topdir, filename)
     subprocess.call(['tar','xzf', inputfile, '-C', os.path.join(topdir, 'Sims')])
     os.remove(inputfile)
+    if os.path.isfile(os.path.join(topdir, 'Sims', '.keep_files')):
+        shutil.move(os.path.join(topdir, 'Sims', '.keep_files'), os.path.join(topdir, '.keep_files'))
     if(rscript):
         scripts_dir = os.path.join(topdir, 'Scripts')
         rscriptfn = os.path.join(base_filter_path, rscript)
@@ -149,6 +151,8 @@ def handle_sweep_job(task, rscript):
     base_folder = os.path.join(exp_root_path, 'base_folder')
     subprocess.call(['tar','xfz', os.path.join(base_folder, filename), '-C', base_folder])
     os.remove(os.path.join(base_folder, filename))
+    if os.path.isfile(os.path.join(base_folder, '.keep_files')):
+        shutil.move(os.path.join(base_folder, '.keep_files'), os.path.join(exp_root_path, '.keep_files'))
     with open(os.path.join(base_folder, 'job_desc.json')) as data_file:
         jsondata = json.load(data_file)
 
@@ -243,8 +247,11 @@ def handle_special_job(task, rscript):
     filename = task[2]
     copy_tree(base_graple_path, exp_root_path)
     subprocess.call(['python', os.path.join(exp_root_path, 'CreateWorkingFolders.py')])
-    base_folder = os.path.join(exp_root_path,'base_folder')
-    subprocess.call(['tar','xfz', os.path.join(base_folder,filename), '-C', base_folder])
+    base_folder = os.path.join(exp_root_path, 'base_folder')
+    subprocess.call(['tar','xfz', os.path.join(base_folder, filename), '-C', base_folder])
+    os.remove(os.path.join(base_folder, filename))
+    if os.path.isfile(os.path.join(base_folder, '.keep_files')):
+        shutil.move(os.path.join(base_folder, '.keep_files'), os.path.join(exp_root_path, '.keep_files'))
     with open(os.path.join(base_folder, 'job_desc.json')) as data_file:    
         jsondata = json.load(data_file)
 
@@ -329,6 +336,8 @@ def generate_sweep_job(task, rscript):
     base_folder = os.path.join(exp_root_path, 'base_folder')
     subprocess.call(['tar','xfz', os.path.join(base_folder, filename), '-C', base_folder])
     os.remove(os.path.join(base_folder, filename))
+    if os.path.isfile(os.path.join(base_folder, '.keep_files')):
+        shutil.move(os.path.join(base_folder, '.keep_files'), os.path.join(exp_root_path, '.keep_files'))
     with open(os.path.join(base_folder, 'job_desc.json')) as data_file:
         jsondata = json.load(data_file)
 
@@ -415,6 +424,9 @@ def generate_special_job(task, rscript):
     subprocess.call(['python', os.path.join(exp_root_path, 'CreateWorkingFolders.py')])
     base_folder = os.path.join(exp_root_path, 'base_folder')
     subprocess.call(['tar','xfz', os.path.join(base_folder, filename), '-C', base_folder])
+    os.remove(os.path.join(base_folder, filename))
+    if os.path.isfile(os.path.join(base_folder, '.keep_files')):
+        shutil.move(os.path.join(base_folder, '.keep_files'), os.path.join(exp_root_path, '.keep_files'))
     with open(os.path.join(base_folder, 'job_desc.json')) as data_file:    
         jsondata = json.load(data_file)
 

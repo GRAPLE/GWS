@@ -2,11 +2,12 @@
 
 from pymongo import MongoClient
 from gwsconfig import gwsconf
-import sys, string, random, datetime, pytz
+import sys, string, random, datetime, pytz, json
 
 db_client = MongoClient()
 db = db_client[gwsconf['graple_db_name']]
 collection = db[gwsconf['api_coll_name']]
+expcoll = db[gwsconf['graple_coll_name']]
 
 def api_keygen(size = 64, chars = string.ascii_uppercase + string.digits):
     random.seed()
@@ -22,6 +23,9 @@ if len(sys.argv) == 1:
     print 'delete email'
     print 'query email'
     print 'print'
+    print 'export filename'
+    print 'import filename'
+    print 'dropexp'
     sys.exit()
 
 operation = sys.argv[1]
@@ -36,6 +40,9 @@ operation = sys.argv[1]
 if operation == 'drop':
     collection.drop()
     print "Dropped the API key collection"
+elif operation == 'dropexp':
+    expcoll.drop()
+    print "Dropped the Experiment collection"
 elif operation == 'insert':
     insdoc = {'key': api_keygen(),'name':sys.argv[2], 'email':sys.argv[3], 'tz':sys.argv[4]}
     if insdoc['tz'] in pytz.all_timezones:
@@ -53,3 +60,10 @@ elif operation == 'query':
 elif operation == 'print':
     for doc in collection.find({}):
         print doc
+elif operation == 'export':
+    with open(sys.argv[2], 'w') as ff:
+        json.dump(list(collection.find({}, {'_id':False})), ff)
+elif operation == 'import':
+    with open(sys.argv[2], 'r') as ff:
+        insdoc = json.load(ff)
+    print "Inserted at ID:", collection.insert_many(insdoc).inserted_ids
