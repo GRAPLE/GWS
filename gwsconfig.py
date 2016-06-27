@@ -3,6 +3,7 @@ import datetime
 
 gwsconf = {
     'debug' : True,
+    'def_sims_per_job' : 5,
     'refresh_delay' : datetime.timedelta(seconds = 30),
     'smtp_server' : 'smtp.gmail.com:587',
     'smtp_user' : 'example',
