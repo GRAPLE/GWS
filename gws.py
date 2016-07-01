@@ -35,12 +35,13 @@ apicoll = db[gwsconf['api_coll_name']]
 # mongodb document
 # { 'key': the uid of the experiment 
 #   'status': see status codes below
-#   'payload': list with integers? representing condor cluster IDs of experiment jobs
+#   'payload': list with integers representing condor cluster IDs of experiment jobs
 #   'submitted': datetime.datetime object representing time of submission (localtime)
 #   'completed': datetime.datetime object representing time of completion
 #   'expiry': datetime.datetime object representing when to delete the results
 #   'progress': float representing progress of experiment
 #   'retention': how long to keep files after completion
+#   'apikey': the api key used to submit the experiment
 # }
 
 # Description of mongodb document 'status' codes
@@ -458,20 +459,22 @@ def abort_job(uid):
     return jsonify(response)
 
 @app.route('/GrapleRunResults/<uid>', methods=['GET'])
-def return_consolidated_output(uid, plain = False):
+def return_consolidated_output(uid):
     global base_upload_path
     response = {'errors':'', 'warnings':''}
-    if not plain:
-        if 'apikey' in request.args:
-            apikey = request.args['apikey']
-            if apikey == '0':
-                response['warnings'] += 'No API key provided \n'
-        else:
-            response['errors'] += 'No API key provided \n'
-        query = {'key':uid, 'apikey':apikey}
+    if 'apikey' in request.args:
+        apikey = request.args['apikey']
+        if apikey == '0':
+            response['warnings'] += 'No API key provided \n'
     else:
-        query = {'key':uid}
+        response['errors'] += 'No API key provided \n'
+
+    if len(response['errors']) > 0:
+        return jsonify(response)
+
+    query = {'key':uid, 'apikey':apikey}
     dbdoc = collection.find_one(query)
+    
     if dbdoc == None:
         response['errors'] = 'JobID ' + uid + ' not found in database'
     elif dbdoc['progress'] != 100 or dbdoc['status'] < 3:
@@ -480,7 +483,7 @@ def return_consolidated_output(uid, plain = False):
         response['errors'] = 'Sorry, results not available anymore. Job expired'
 
     if len(response['errors']) > 0:
-        return response if plain else jsonify(response)
+        return jsonify(response)
 
     response['output_url'] = url_for('static', filename = os.path.join(uid, 'output.tar.gz')) 
     response['status'] = 'success'
@@ -489,16 +492,8 @@ def return_consolidated_output(uid, plain = False):
         if dbdoc['retention'] == 0:
             update_doc['expiry'] = datetime.datetime.now() + gwsconf['retention_after_dl']
         collection.update_one({'key':uid}, {'$set':update_doc}) # not yet downloaded though. download can be in progress.
-    return response if plain else jsonify(response)
+    return jsonify(response)
         
-@app.route('/DownloadResults/<uid>', methods=['GET'])
-def download_results(uid):
-    response = return_consolidated_output(uid, True)
-    if 'status' in response and response['status'] == 'success':
-        return redirect(response['output_url'])
-    else:
-        return jsonify(response)
-
 @app.route('/service_status', methods=['GET'])
 def return_service_status():
     service_status = {}

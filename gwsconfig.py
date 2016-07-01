@@ -16,4 +16,5 @@ gwsconf = {
     'graple_db_name' : 'grapleDB',
     'graple_coll_name' : 'grapleColl',
     'api_coll_name' : 'grapleAPI',
+    'compression_cores' : 2,
 }

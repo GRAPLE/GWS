@@ -21,7 +21,7 @@ collection = db[gwsconf['graple_coll_name']]
 api_collection = db[gwsconf['api_coll_name']]
 
 refresh_delay = gwsconf['refresh_delay']
-
+compression_cores = str(gwsconf['compression_cores'])
 
 email_template = '''
 Dear {username}, 
@@ -35,12 +35,12 @@ Details:
     Submitted: {subtime}
     Completed: {comptime}
     Expiry: {exptime}
-    Link to Results: {reslink}
 
 Thanks!
 
 NOTE: 
 All times are according to {time_zone}.
+This will be the only email sent to you for this experiment. No more notifications will be sent.
 Replies to this email are not monitored. 
 '''
 #while(True)
@@ -99,7 +99,7 @@ def process_graple_results(uid, retention):
         os.mkdir(res_dir)
         exp_res_dir = os.path.join(base_upload_path, uid, 'Results')
         bzlist = [bzfn for bzfn in listdir(exp_res_dir) if bzfn.endswith('.tar.bz2')]
-        subprocess.call(['parallel', 'tar', 'jxf', ':::'] + bzlist, cwd = exp_res_dir)
+        subprocess.call(['parallel', '-P', compression_cores, 'tar', 'jxf', ':::'] + bzlist, cwd = exp_res_dir)
         subprocess.call(['rm'] + bzlist, cwd = exp_res_dir)
         cons_script = os.path.join(exp_res_dir, 'ConsolidateResults.py')
         if os.path.isfile(cons_script):
@@ -107,7 +107,7 @@ def process_graple_results(uid, retention):
         if os.path.isfile(kfpath):
             shutil.copytree(os.path.join(base_upload_path, uid, 'Logs'), os.path.join(exp_res_dir, 'Logs'))
             shutil.copy(os.path.join(base_upload_path, uid, 'graple.log'), os.path.join(exp_res_dir, 'Logs'))
-        subprocess.call(['tar', 'I', 'pigz', '-cf', tarfn] + listdir(exp_res_dir), cwd = exp_res_dir)
+        subprocess.call(['tar', 'I', 'pigz -p ' + compression_cores, '-cf', tarfn] + listdir(exp_res_dir), cwd = exp_res_dir)
     if os.path.isfile(kfpath):
         with open(kfpath, 'a') as kffd:
             kffd.write(" processed results")
@@ -127,7 +127,6 @@ def process_graple_results(uid, retention):
             time_zone = apidbdoc['tz'],
             expid = dbdoc['key'],
             subtime = convert_tz(dbdoc['submitted'], apidbdoc['tz']).ctime(),
-            reslink = serv_dl_addr + dbdoc['key'],
             comptime = convert_tz(dbdoc['completed'], apidbdoc['tz']).ctime(),
             exptime = convert_tz(dbdoc['expiry'], apidbdoc['tz']).ctime() if 'expiry' in dbdoc else 'On first download'))
         emailmsg['From'] = email.utils.formataddr((str(Header('Graple Notifier', 'utf-8')), gwsconf['smtp_user']))
