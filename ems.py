@@ -90,11 +90,12 @@ def convert_tz(local_time, new_tz):
     local_tz = pytz.timezone("US/Eastern")
     return local_tz.localize(local_time).astimezone(pytz.timezone(new_tz))
 
-def process_graple_results(uid, retention):
+def process_graple_results(dbdoc):
     global base_upload_path, base_result_path
+    uid = dbdoc['key']
+    apidbdoc = api_collection.find_one({'key':dbdoc['apikey']})
     res_dir = os.path.join(base_result_path, uid) # can change uid to random folder name for security
     tarfn = os.path.join(res_dir, 'output.tar.gz')
-    kfpath = os.path.join(base_upload_path, uid, '.keep_files')
     if not os.path.isfile(tarfn):
         os.mkdir(res_dir)
         exp_res_dir = os.path.join(base_upload_path, uid, 'Results')
@@ -104,23 +105,19 @@ def process_graple_results(uid, retention):
         cons_script = os.path.join(exp_res_dir, 'ConsolidateResults.py')
         if os.path.isfile(cons_script):
             subprocess.call(['python', cons_script])
-        if os.path.isfile(kfpath):
+        if apidbdoc['debug']:
             shutil.copytree(os.path.join(base_upload_path, uid, 'Logs'), os.path.join(exp_res_dir, 'Logs'))
             shutil.copy(os.path.join(base_upload_path, uid, 'graple.log'), os.path.join(exp_res_dir, 'Logs'))
         subprocess.call(['tar', 'I', 'pigz -p ' + compression_cores, '-cf', tarfn] + listdir(exp_res_dir), cwd = exp_res_dir)
-    if os.path.isfile(kfpath):
-        with open(kfpath, 'a') as kffd:
-            kffd.write(" processed results")
-    else:
+    if not apidbdoc['debug'] and os.path.exists(os.path.join(base_upload_path, uid)):
         shutil.rmtree(os.path.join(base_upload_path, uid))
     comp_time = datetime.datetime.now()
     update_doc = {'status':3, 'progress':100.0, 'completed':comp_time}
-    if retention != 0:
-        update_doc['expiry'] = (gwsconf['retention_unit'] * retention) + comp_time # days = retention
+    if dbdoc['retention'] != 0:
+        update_doc['expiry'] = (gwsconf['retention_unit'] * dbdoc['retention']) + comp_time
     collection.update_one({'key':uid}, {'$set':update_doc})
-    dbdoc = collection.find_one({'key':uid})
-    apidbdoc = api_collection.find_one({'key':dbdoc['apikey']})
     if 'email' in dbdoc and len(dbdoc['email']) > 0:
+        dbdoc = collection.find_one({'key':uid})
         expName = dbdoc['expname'] if len(dbdoc['expname']) > 0 else dbdoc['key']
         emailmsg = MIMEText(email_template.format(expname = expName,
             username = apidbdoc['name'].split()[0],
@@ -146,7 +143,7 @@ def process_once():
         cout = subprocess.check_output(condor_command)
         prog = round(float(cout.count('4'))/len(dbdoc['payload'])*100, 2)
         if prog == 100:
-            process_graple_results(dbdoc['key'], dbdoc['retention'])
+            process_graple_results(dbdoc)
         elif dbdoc['progress'] != prog:
             collection.update_one({'key':dbdoc['key']}, {'$set':{'progress':prog}})
 

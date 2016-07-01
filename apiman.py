@@ -23,6 +23,7 @@ if len(sys.argv) == 1:
     print 'delete email'
     print 'query email'
     print 'print'
+    print 'debug on/off email'
     print 'export filename'
     print 'import filename'
     print 'dropexp'
@@ -35,6 +36,7 @@ operation = sys.argv[1]
 # 'name': name of the user
 # 'email': default email address of the user
 # 'tz': timezone for emails 
+# 'debug': whether to include logs with results
 # }
 
 if operation == 'drop':
@@ -57,6 +59,8 @@ elif operation == 'delete':
     print "Delete count:", collection.delete_one({'email':sys.argv[2]}).raw_result['n']
 elif operation == 'query':
     print collection.find_one({'email':sys.argv[2]})
+elif operation == 'debug':
+    print 'Modified:', collection.update_one({'email':sys.argv[3]}, {'$set':{'debug': True if sys.argv[2] == 'on' else False}}).modified_count
 elif operation == 'print':
     for doc in collection.find({}):
         print doc
