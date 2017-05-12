@@ -19,6 +19,7 @@ def api_keygen(size = 64, chars = string.ascii_uppercase + string.digits):
 if len(sys.argv) == 1:
     print 'Usage:'
     print 'drop'
+    print 'insertdef'
     print 'insert name email tz'
     print 'delete email'
     print 'query email'
