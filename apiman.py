@@ -19,6 +19,7 @@ def api_keygen(size = 64, chars = string.ascii_uppercase + string.digits):
 if len(sys.argv) == 1:
     print 'Usage:'
     print 'drop'
+    print 'insertdef'
     print 'insert name email tz'
     print 'delete email'
     print 'query email'
@@ -45,8 +46,18 @@ if operation == 'drop':
 elif operation == 'dropexp':
     expcoll.drop()
     print "Dropped the Experiment collection"
+elif operation == 'insertdef':
+    insdoc = {'key': '0' ,'name':'Graple User', 'email':'', 'tz':'US/Eastern', 'debug':False}
+    if insdoc['tz'] in pytz.all_timezones:
+        print "Inserted at ID:", collection.insert_one(insdoc).inserted_id
+    else:
+        print "Timezone not found. Closest matches:"
+        for tzitem in pytz.all_timezones:
+            if insdoc['tz'] in tzitem:
+                print tzitem
 elif operation == 'insert':
-    insdoc = {'key': api_keygen(),'name':sys.argv[2], 'email':sys.argv[3], 'tz':sys.argv[4]}
+    # Setting the default value for debug as False while creating a user, it could be modified using the command line option - debug
+    insdoc = {'key': api_keygen(),'name':sys.argv[2], 'email':sys.argv[3], 'tz':sys.argv[4], 'debug':False} 
     if insdoc['tz'] in pytz.all_timezones:
         print "Inserted at ID:", collection.insert_one(insdoc).inserted_id
     else:
