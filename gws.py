@@ -42,6 +42,7 @@ apicoll = db[gwsconf['api_coll_name']]
 #   'progress': float representing progress of experiment
 #   'retention': how long to keep files after completion
 #   'apikey': the api key used to submit the experiment
+#   'glm': GLM version to be used for running the experiment
 # }
 
 # Description of mongodb document 'status' codes
@@ -118,6 +119,17 @@ def handle_batch_job(task, rscript):
     topdir = task[1]
     filename = task[2]
     sims_per_job = task[3]
+    uid = os.path.basename(topdir)
+    dbdoc = collection.find_one({'key':uid})
+    if str(dbdoc['glm']) == '3':
+        with open(os.path.join(topdir, 'glm.sh'), 'w') as sh:
+            sh.write('#!/bin/sh\n')
+            sh.write('/usr/local/bin/glm3\n')
+    else:
+        with open(os.path.join(topdir, 'glm.sh'), 'w') as sh:
+            sh.write('#!/bin/sh\n')
+            sh.write('/usr/local/bin/glm\n')
+    os.chmod(os.path.join(topdir, 'glm.sh'), 0775)
     copy_tree(base_graple_path, topdir)
     subprocess.call(['python' , os.path.join(topdir, 'CreateWorkingFolders.py')])
     inputfile = os.path.join(topdir, filename)
@@ -141,6 +153,17 @@ def generate_sweep_job(task, rscript):
     exp_root_path = task[1]
     filename = task[2]
     sims_per_job = task[3]
+    uid = os.path.basename(exp_root_path)
+    dbdoc = collection.find_one({'key':uid})
+    if str(dbdoc['glm']) == '3':
+        with open(os.path.join(exp_root_path, 'glm.sh'), 'w') as sh:
+            sh.write('#!/bin/sh\n')
+            sh.write('/usr/local/bin/glm3\n')
+    else:
+        with open(os.path.join(exp_root_path, 'glm.sh'), 'w') as sh:
+            sh.write('#!/bin/sh\n')
+            sh.write('/usr/local/bin/glm\n')
+    os.chmod(os.path.join(exp_root_path, 'glm.sh'), 0775)
     copy_tree(base_graple_path, exp_root_path)
     subprocess.call(['python', os.path.join(exp_root_path, 'CreateWorkingFolders.py')])
     base_folder = os.path.join(exp_root_path, 'base_folder')
@@ -230,6 +253,17 @@ def generate_special_job(task, rscript):
     exp_root_path = task[1]
     filename = task[2]
     sims_per_job = task[3]
+    uid = os.path.basename(exp_root_path)
+    dbdoc = collection.find_one({'key':uid})
+    if str(dbdoc['glm']) == '3':
+        with open(os.path.join(exp_root_path, 'glm.sh'), 'w') as sh:
+            sh.write('#!/bin/sh\n')
+            sh.write('/usr/local/bin/glm3\n')
+    else:
+        with open(os.path.join(exp_root_path, 'glm.sh'), 'w') as sh:
+            sh.write('#!/bin/sh\n')
+            sh.write('/usr/local/bin/glm\n')
+    os.chmod(os.path.join(exp_root_path, 'glm.sh'), 0775)
     copy_tree(base_graple_path, exp_root_path)
     subprocess.call(['python', os.path.join(exp_root_path, 'CreateWorkingFolders.py')])
     base_folder = os.path.join(exp_root_path, 'base_folder')
@@ -354,12 +388,16 @@ def check_request():
             found = apicoll.find_one({'key' : apikey})
             if found != None and 'email' in found:
                 email = found['email']
-    return response, apikey, filtername, sims_per_job, retention, expname, email
+    if 'glm' in request.form:
+        glm = request.form['glm']
+    else:
+        glm = '2.1.8'
+    return response, apikey, filtername, sims_per_job, retention, expname, email, glm
 
 @app.route('/GrapleRun', methods= ['POST'])
 def batch_job():
     global base_upload_path
-    response, apikey, filtername, sims_per_job, retention, expname, email = check_request()
+    response, apikey, filtername, sims_per_job, retention, expname, email, glm = check_request()
     if len(response['errors']) > 0:
         return jsonify(response)
 
@@ -370,14 +408,14 @@ def batch_job():
     os.mkdir(exp_root_path)
     f.save(os.path.join(exp_root_path, filename))
     task_desc = ['handle_batch_job', exp_root_path, filename, sims_per_job]
-    collection.insert_one({'key':response['uid'], 'submitted':datetime.datetime.now(), 'status':1, 'progress':0.0, 'retention':retention, 'expname':expname, 'email':email, 'apikey':apikey})
+    collection.insert_one({'key':response['uid'], 'submitted':datetime.datetime.now(), 'status':1, 'progress':0.0, 'retention':retention, 'expname':expname, 'email':email, 'apikey':apikey, 'glm':glm})
     doTask.delay(task_desc, filtername)
     return jsonify(response)
 
 @app.route('/GrapleRunLinearSweep', methods= ['POST'])
 def linear_sweep():
     global base_upload_path
-    response, apikey, filtername, sims_per_job, retention, expname, email = check_request()
+    response, apikey, filtername, sims_per_job, retention, expname, email, glm = check_request()
     if len(response['errors']) > 0:
         return jsonify(response)
 
@@ -390,7 +428,7 @@ def linear_sweep():
     os.mkdir(base_folder)
     f.save(os.path.join(base_folder, filename))
     task_desc = ['generate_sweep_job', exp_root_path, filename, sims_per_job]
-    collection.insert_one({'key':response['uid'], 'submitted':datetime.datetime.now(), 'status':1, 'progress':0.0, 'retention':retention, 'expname':expname, 'email':email, 'apikey':apikey})
+    collection.insert_one({'key':response['uid'], 'submitted':datetime.datetime.now(), 'status':1, 'progress':0.0, 'retention':retention, 'expname':expname, 'email':email, 'apikey':apikey, 'glm':glm})
     doTask.delay(task_desc, filtername)
     response['status'] = 'Job submitted to task queue'
     return jsonify(response)
@@ -398,7 +436,7 @@ def linear_sweep():
 @app.route('/GrapleRunMetSample', methods= ['POST'])
 def special_batch():
     global base_upload_path
-    response, apikey, filtername, sims_per_job, retention, expname, email = check_request()
+    response, apikey, filtername, sims_per_job, retention, expname, email, glm = check_request()
     if len(response['errors']) > 0: 
         return jsonify(response)
 
@@ -411,7 +449,7 @@ def special_batch():
     os.mkdir(base_folder)
     f.save(os.path.join(base_folder, filename))
     task_desc = ['generate_special_job', exp_root_path, filename, sims_per_job]
-    collection.insert_one({'key':response['uid'], 'submitted':datetime.datetime.now(), 'status':1, 'progress':0.0, 'retention':retention, 'expname':expname, 'email':email, 'apikey':apikey})
+    collection.insert_one({'key':response['uid'], 'submitted':datetime.datetime.now(), 'status':1, 'progress':0.0, 'retention':retention, 'expname':expname, 'email':email, 'apikey':apikey, 'glm':glm})
     doTask.delay(task_desc, filtername)
     response['status'] = 'Job submitted to task queue'
     return jsonify(response)
@@ -512,9 +550,8 @@ def get_PPOLibrary_scripts():
 
 @app.route('/GrapleGetVersion', methods=['GET'])
 def get_version():
-    compatibleGRAPLEVersions = [] 
     #code for getting the compatible versions of GRAPLEr 
-    compatibleGRAPLEVersions.append('3.1.0') 
+    compatibleGRAPLEVersions = ['3.1.0', '3.2.0'] 
     return json.dumps(compatibleGRAPLEVersions)
 
 @app.route('/', methods=['GET'])
