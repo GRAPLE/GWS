@@ -514,7 +514,7 @@ def get_PPOLibrary_scripts():
 def get_version():
     compatibleGRAPLEVersions = [] 
     #code for getting the compatible versions of GRAPLEr 
-    compatibleGRAPLEVersions.append('3.1.0') 
+    compatibleGRAPLEVersions.extend(['3.1.0', '3.1.1']) 
     return json.dumps(compatibleGRAPLEVersions)
 
 @app.route('/', methods=['GET'])
