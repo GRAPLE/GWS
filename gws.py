@@ -8,6 +8,7 @@ from distutils.dir_util import copy_tree
 from celery import Celery
 from pymongo import MongoClient
 from gwsconfig import gwsconf
+from werkzeug.utils import secure_filename
 
 # global variables and paths
 base_working_path = gwsconf['base_working_path']
@@ -312,7 +313,7 @@ def generate_special_job(task, rscript):
 def check_request():
     global base_filter_path
     response = {'errors' : '', 'warnings': ''}
-    if not 'files' in request.files:
+    if request.files['files'].filename == '':
         response['errors'] += 'Did not receive experiment files \n'
     if 'apikey' in request.form:
         apikey = request.form['apikey']
@@ -434,7 +435,7 @@ def check_status(uid):
     if len(response['errors']) > 0:
         return jsonify(response)
 
-    response['curr_status'] = str(dbdoc['progress']) + '% complete'
+    response['curr_status'] = str(dbdoc['progress']) + '% completed '
     return jsonify(response)
     
 @app.route('/GrapleEnd/<uid>', methods=['GET'])
@@ -478,7 +479,7 @@ def return_consolidated_output(uid):
     if dbdoc == None:
         response['errors'] = 'JobID ' + uid + ' not found in database'
     elif dbdoc['progress'] != 100 or dbdoc['status'] < 3:
-        response['errors'] = str(dbdoc['progress']) + '% complete. Job under processing, please try after some time'
+        response['errors'] = str(dbdoc['progress']) + '% completed. Job under processing, please try after some time'
     elif dbdoc['status'] > 4: # job aborted or expired
         response['errors'] = 'Sorry, results not available anymore. Job expired'
 
@@ -512,9 +513,8 @@ def get_PPOLibrary_scripts():
 
 @app.route('/GrapleGetVersion', methods=['GET'])
 def get_version():
-    compatibleGRAPLEVersions = [] 
     #code for getting the compatible versions of GRAPLEr 
-    compatibleGRAPLEVersions.extend(['3.1.0', '3.1.1']) 
+    compatibleGRAPLEVersions = ['3.1.0', '3.1.1', '3.1.2']
     return json.dumps(compatibleGRAPLEVersions)
 
 @app.route('/', methods=['GET'])
